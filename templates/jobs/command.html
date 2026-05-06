@@ -1,0 +1,295 @@
+{% extends 'base.html' %}
+
+{% block title %}Command — CNC Lathe{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="page-heading">Send Machining Command</h5>
+</div>
+
+<div class="row g-3">
+
+    <!-- Left column: input + actions -->
+    <div class="col-lg-5">
+
+        <!-- Step 1 -->
+        <div class="cnc-card">
+            <div class="cnc-card-title">
+                <i class="bi bi-chat-left-text"></i> Step 1 — Describe the Operation
+            </div>
+            <textarea class="form-control mb-2" id="command-input" rows="3"
+                placeholder="e.g. Turn diameter to 20mm for 50mm length"></textarea>
+
+            <div class="mb-3">
+                <div class="text-muted mb-1" style="font-size:0.75rem">Quick examples:</div>
+                <span class="example-chip" onclick="setExample(this)">Turn diameter to 20mm for 50mm length</span>
+                <span class="example-chip" onclick="setExample(this)">Face the workpiece</span>
+                <span class="example-chip" onclick="setExample(this)">Cut a groove 5mm deep at Z30</span>
+                <span class="example-chip" onclick="setExample(this)">Move to X10 Z20</span>
+                <span class="example-chip" onclick="setExample(this)">Turn 35mm diameter, 80mm long, feed 150</span>
+            </div>
+
+            <button class="btn btn-primary w-100" id="generate-btn">
+                <i class="bi bi-magic me-1"></i>Generate G-code with AI
+            </button>
+        </div>
+
+        <!-- Validation feedback -->
+        <div id="validation-box" class="validation-box"></div>
+
+        <!-- Step 3 (hidden until G-code exists) -->
+        <div class="cnc-card" id="execute-card" style="display:none">
+            <div class="cnc-card-title">
+                <i class="bi bi-play-circle"></i> Step 3 — Run on Machine
+            </div>
+
+            <div class="d-flex gap-2 mb-3">
+                <button class="btn btn-outline-secondary btn-sm flex-grow-1" id="validate-btn">
+                    <i class="bi bi-shield-check me-1"></i>Validate
+                </button>
+                <button class="btn btn-success flex-grow-1" id="execute-btn">
+                    <i class="bi bi-play-fill me-1"></i>Execute
+                </button>
+            </div>
+
+            <!-- Progress (shown during execution) -->
+            <div id="job-progress" style="display:none">
+                <div class="d-flex justify-content-between mb-1">
+                    <small class="text-muted fw-semibold">Executing…</small>
+                    <small class="text-muted" id="progress-text">0 / 0 lines</small>
+                </div>
+                <div class="progress mb-1" style="height:10px">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated bg-success"
+                         id="progress-bar" style="width:0%"></div>
+                </div>
+                <small class="text-muted" id="progress-status"></small>
+            </div>
+        </div>
+
+    </div><!-- /left -->
+
+    <!-- Right column: G-code preview -->
+    <div class="col-lg-7">
+        <div class="cnc-card">
+            <div class="cnc-card-title d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-code-square me-1"></i>Step 2 — G-code Preview</span>
+                <small class="text-muted" id="gcode-line-count"></small>
+            </div>
+            <textarea class="form-control" id="gcode-preview" rows="18"
+                placeholder="Generated G-code will appear here.&#10;&#10;You can edit it manually before executing."></textarea>
+            <div class="d-flex gap-2 mt-2">
+                <button class="btn btn-outline-secondary btn-sm" id="clear-gcode-btn">
+                    <i class="bi bi-trash me-1"></i>Clear
+                </button>
+                <button class="btn btn-outline-secondary btn-sm" id="copy-gcode-btn">
+                    <i class="bi bi-clipboard me-1"></i>Copy
+                </button>
+            </div>
+        </div>
+    </div><!-- /right -->
+
+</div><!-- /.row -->
+{% endblock %}
+
+{% block extra_js %}
+<script>
+var currentJobId   = null;
+var execInterval   = null;
+
+/* ── Example chips ──────────────────────────── */
+function setExample(el) {
+    document.getElementById('command-input').value = el.textContent.trim();
+    document.getElementById('command-input').focus();
+}
+
+/* ── Helper: update line count label ─────────── */
+function updateLineCount(gcode) {
+    var lines = gcode.split('\n').filter(function (l) {
+        return l.trim() && !l.trim().startsWith(';');
+    }).length;
+    document.getElementById('gcode-line-count').textContent =
+        lines > 0 ? lines + ' lines' : '';
+}
+
+/* ── Helper: show / clear validation box ─────── */
+function showValidation(data) {
+    var box = document.getElementById('validation-box');
+    box.style.display = 'block';
+    if (data.valid) {
+        box.className = 'validation-box valid';
+        var warn = data.warnings && data.warnings.length
+            ? '<br><small>⚠ ' + data.warnings.join('; ') + '</small>' : '';
+        box.innerHTML =
+            '<i class="bi bi-check-circle-fill me-1"></i>Valid — ' +
+            data.line_count + ' executable line(s).' + warn;
+    } else {
+        box.className = 'validation-box invalid';
+        box.innerHTML =
+            '<i class="bi bi-x-circle-fill me-1"></i><strong>Invalid G-code</strong><br>' +
+            '<small>' + data.errors.join('<br>') + '</small>';
+    }
+}
+
+function clearValidation() {
+    var box = document.getElementById('validation-box');
+    box.style.display = 'none';
+    box.className = 'validation-box';
+}
+
+/* ── Step 1: Generate ───────────────────────── */
+document.getElementById('generate-btn').addEventListener('click', function () {
+    var command = document.getElementById('command-input').value.trim();
+    if (!command) { showToast('Please enter a machining command', 'warning'); return; }
+
+    var btn = this;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Generating…';
+    clearValidation();
+
+    postJson('/jobs/generate/', { command: command })
+        .then(function (data) {
+            if (data.success) {
+                document.getElementById('gcode-preview').value = data.gcode;
+                currentJobId = data.job_id;
+                updateLineCount(data.gcode);
+                document.getElementById('execute-card').style.display = 'block';
+                showToast('G-code generated successfully', 'success');
+            } else {
+                showToast(data.message || 'Generation failed', 'danger');
+            }
+        })
+        .catch(function () { showToast('Network error — could not reach server', 'danger'); })
+        .finally(function () {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-magic me-1"></i>Generate G-code with AI';
+        });
+});
+
+/* ── Step 2 (optional): Validate ────────────── */
+document.getElementById('validate-btn').addEventListener('click', function () {
+    var gcode = document.getElementById('gcode-preview').value.trim();
+    if (!gcode) { showToast('No G-code to validate', 'warning'); return; }
+
+    var btn = this;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+    postJson('/jobs/validate/', { gcode: gcode })
+        .then(function (data) { showValidation(data); })
+        .catch(function () { showToast('Validation request failed', 'danger'); })
+        .finally(function () {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-shield-check me-1"></i>Validate';
+        });
+});
+
+/* ── Step 3: Execute ────────────────────────── */
+document.getElementById('execute-btn').addEventListener('click', function () {
+    var gcode   = document.getElementById('gcode-preview').value.trim();
+    var command = document.getElementById('command-input').value.trim();
+    if (!gcode) { showToast('No G-code to execute', 'warning'); return; }
+
+    var execBtn    = this;
+    var valBtn     = document.getElementById('validate-btn');
+    var progressEl = document.getElementById('job-progress');
+
+    execBtn.disabled = true;
+    valBtn.disabled  = true;
+    progressEl.style.display = 'block';
+    clearValidation();
+
+    // Reset progress bar
+    var bar = document.getElementById('progress-bar');
+    bar.className = 'progress-bar progress-bar-striped progress-bar-animated bg-success';
+    bar.style.width = '0%';
+    document.getElementById('progress-text').textContent = '0 / 0 lines';
+    document.getElementById('progress-status').textContent = '';
+
+    postJson('/jobs/execute/', {
+        gcode:   gcode,
+        command: command,
+        job_id:  currentJobId,
+    })
+    .then(function (data) {
+        if (data.success) {
+            currentJobId = data.job_id;
+            showToast('Job started — executing G-code', 'success');
+            startExecutionPolling(execBtn, valBtn);
+        } else {
+            showToast(data.message || 'Execution failed', 'danger');
+            progressEl.style.display = 'none';
+            execBtn.disabled = false;
+            valBtn.disabled  = false;
+        }
+    })
+    .catch(function () {
+        showToast('Network error during execute', 'danger');
+        progressEl.style.display = 'none';
+        execBtn.disabled = false;
+        valBtn.disabled  = false;
+    });
+});
+
+/* ── Poll status during job execution ────────── */
+function startExecutionPolling(execBtn, valBtn) {
+    if (execInterval) clearInterval(execInterval);
+
+    execInterval = setInterval(function () {
+        fetch('/machine/status/')
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                var pct = data.total_lines > 0
+                    ? Math.round((data.current_line / data.total_lines) * 100) : 0;
+
+                document.getElementById('progress-bar').style.width = pct + '%';
+                document.getElementById('progress-text').textContent =
+                    data.current_line + ' / ' + data.total_lines + ' lines';
+                document.getElementById('progress-status').textContent =
+                    data.error_message || '';
+
+                if (data.status !== 'running') {
+                    clearInterval(execInterval);
+                    execInterval = null;
+                    execBtn.disabled = false;
+                    valBtn.disabled  = false;
+
+                    var bar = document.getElementById('progress-bar');
+                    if (data.status === 'connected') {
+                        bar.className = 'progress-bar bg-success';
+                        bar.style.width = '100%';
+                        document.getElementById('progress-text').textContent = 'Completed';
+                        showToast('Job completed successfully!', 'success');
+                    } else if (data.status === 'error') {
+                        bar.className = 'progress-bar bg-danger';
+                        showToast('Job ended: ' + (data.error_message || 'Error'), 'danger');
+                    }
+                }
+            })
+            .catch(function () { /* ignore polling errors */ });
+    }, 1000);
+}
+
+/* ── G-code textarea listeners ──────────────── */
+document.getElementById('gcode-preview').addEventListener('input', function () {
+    updateLineCount(this.value);
+});
+
+document.getElementById('clear-gcode-btn').addEventListener('click', function () {
+    document.getElementById('gcode-preview').value = '';
+    document.getElementById('gcode-line-count').textContent = '';
+    document.getElementById('execute-card').style.display = 'none';
+    document.getElementById('job-progress').style.display = 'none';
+    clearValidation();
+    currentJobId = null;
+    if (execInterval) { clearInterval(execInterval); execInterval = null; }
+});
+
+document.getElementById('copy-gcode-btn').addEventListener('click', function () {
+    var gcode = document.getElementById('gcode-preview').value;
+    if (!gcode) return;
+    navigator.clipboard.writeText(gcode)
+        .then(function () { showToast('G-code copied to clipboard', 'success'); })
+        .catch(function () { showToast('Copy failed', 'danger'); });
+});
+</script>
+{% endblock %}

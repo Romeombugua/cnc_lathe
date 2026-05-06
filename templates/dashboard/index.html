@@ -1,0 +1,547 @@
+{% extends 'base.html' %}
+
+{% block title %}Dashboard — CNC Lathe{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="page-heading">Dashboard</h5>
+</div>
+
+<!-- ── Row 1: Machine status | Connection | Execute ──────── -->
+<div class="row g-3 mb-3">
+
+    <!-- Machine status -->
+    <div class="col-md-4">
+        <div class="cnc-card h-100">
+            <div class="cnc-card-title"><i class="bi bi-hdd-network"></i> Machine Status</div>
+
+            <div class="d-flex align-items-center gap-2 mb-1">
+                <span class="status-dot disconnected" id="dash-dot"></span>
+                <span id="dash-status-text" class="fw-semibold">Disconnected</span>
+            </div>
+            <p class="text-muted small mb-3" id="dash-job-info">No active job</p>
+
+            <div class="axis-display">
+                <div class="axis-block">
+                    <div class="axis-label">X Axis</div>
+                    <div class="axis-value"><span id="dash-x">0.00</span></div>
+                </div>
+                <div class="axis-block">
+                    <div class="axis-label">Z Axis</div>
+                    <div class="axis-value"><span id="dash-z">0.00</span></div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Connection -->
+    <div class="col-md-4">
+        <div class="cnc-card h-100">
+            <div class="cnc-card-title"><i class="bi bi-plug"></i> Serial Connection</div>
+
+            <div class="mb-2">
+                <label class="form-label small fw-semibold mb-1">COM Port</label>
+                <div class="input-group input-group-sm">
+                    <select class="form-select" id="port-select">
+                        <option value="">Scanning ports…</option>
+                    </select>
+                    <button class="btn btn-outline-secondary" id="refresh-ports-btn" title="Refresh">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label small fw-semibold mb-1">Baud Rate</label>
+                <select class="form-select form-select-sm" id="baud-select">
+                    <option value="115200" selected>115200</option>
+                    <option value="57600">57600</option>
+                    <option value="38400">38400</option>
+                    <option value="19200">19200</option>
+                    <option value="9600">9600</option>
+                </select>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-success btn-sm flex-grow-1" id="connect-btn">
+                    <i class="bi bi-plug-fill"></i> Connect
+                </button>
+                <button class="btn btn-outline-secondary btn-sm flex-grow-1" id="disconnect-btn">
+                    <i class="bi bi-x-circle"></i> Disconnect
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Execute / job control -->
+    <div class="col-md-4">
+        <div class="cnc-card h-100">
+            <div class="cnc-card-title"><i class="bi bi-play-circle"></i> Execute</div>
+
+            <!-- Shown when G-code is ready -->
+            <div id="execute-card" style="display:none">
+                <div class="d-flex gap-2 mb-3">
+                    <button class="btn btn-outline-secondary btn-sm flex-grow-1" id="validate-btn">
+                        <i class="bi bi-shield-check me-1"></i>Validate
+                    </button>
+                    <button class="btn btn-success flex-grow-1" id="execute-btn">
+                        <i class="bi bi-play-fill me-1"></i>Execute
+                    </button>
+                </div>
+            </div>
+
+            <!-- Shown when no G-code yet -->
+            <div id="execute-placeholder">
+                <p class="text-muted small mb-2">Enter a command and generate G-code first.</p>
+            </div>
+
+            <!-- Validation result -->
+            <div id="validation-box" class="validation-box"></div>
+
+            <!-- Execution progress -->
+            <div id="job-progress" style="display:none">
+                <div class="d-flex justify-content-between mb-1">
+                    <small class="text-muted fw-semibold">Executing…</small>
+                    <small class="text-muted" id="progress-text">0 / 0 lines</small>
+                </div>
+                <div class="progress mb-1" style="height:10px">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated bg-success"
+                         id="progress-bar" style="width:0%"></div>
+                </div>
+                <small class="text-muted" id="progress-status"></small>
+            </div>
+
+            <!-- Status polling progress (running jobs) -->
+            <div id="dash-progress-wrap" style="display:none;margin-top:8px">
+                <div class="d-flex justify-content-between mb-1">
+                    <small class="text-muted">Progress</small>
+                    <small class="text-muted" id="dash-progress-text">0 / 0 lines</small>
+                </div>
+                <div class="progress" style="height:8px">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated bg-warning"
+                         id="dash-progress-bar" style="width:0%"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div><!-- /row 1 -->
+
+<!-- ── Row 2: Command input | G-code preview ────────────── -->
+<div class="row g-3 mb-3">
+
+    <!-- Command input -->
+    <div class="col-lg-5">
+        <div class="cnc-card">
+            <div class="cnc-card-title">
+                <i class="bi bi-chat-left-text"></i> Machining Command
+            </div>
+
+            <textarea class="form-control mb-2" id="command-input" rows="3"
+                placeholder="e.g. Turn diameter to 20mm for 50mm length"></textarea>
+
+            <div class="mb-3">
+                <div class="text-muted mb-1" style="font-size:0.75rem">Quick examples:</div>
+                <span class="example-chip" onclick="setExample(this)">Turn diameter to 20mm for 50mm length</span>
+                <span class="example-chip" onclick="setExample(this)">Face the workpiece</span>
+                <span class="example-chip" onclick="setExample(this)">Cut a groove 5mm deep at Z30</span>
+                <span class="example-chip" onclick="setExample(this)">Move to X10 Z20</span>
+                <span class="example-chip" onclick="setExample(this)">Turn 35mm diameter, 80mm long, feed 150</span>
+            </div>
+
+            <button class="btn btn-primary w-100" id="generate-btn">
+                <i class="bi bi-magic me-1"></i>Generate G-code with GPT-5
+            </button>
+        </div>
+    </div>
+
+    <!-- G-code preview -->
+    <div class="col-lg-7">
+        <div class="cnc-card">
+            <div class="cnc-card-title d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-code-square me-1"></i>G-code Preview</span>
+                <small class="text-muted" id="gcode-line-count"></small>
+            </div>
+            <textarea class="form-control" id="gcode-preview" rows="10"
+                placeholder="Generated G-code will appear here.&#10;&#10;You can edit it manually before executing."></textarea>
+            <div class="d-flex gap-2 mt-2">
+                <button class="btn btn-outline-secondary btn-sm" id="clear-gcode-btn">
+                    <i class="bi bi-trash me-1"></i>Clear
+                </button>
+                <button class="btn btn-outline-secondary btn-sm" id="copy-gcode-btn">
+                    <i class="bi bi-clipboard me-1"></i>Copy
+                </button>
+            </div>
+        </div>
+    </div>
+
+</div><!-- /row 2 -->
+
+<!-- ── Row 3: Recent jobs | Event log ───────────────────── -->
+<div class="row g-3">
+
+    <!-- Recent jobs -->
+    <div class="col-lg-7">
+        <div class="cnc-card">
+            <div class="cnc-card-title d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-list-check"></i> Recent Jobs</span>
+                <a href="{% url 'jobs:history' %}" class="small text-muted">View all →</a>
+            </div>
+            {% if recent_jobs %}
+            <div class="table-responsive">
+                <table class="table table-sm table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width:40px">#</th>
+                            <th>Command</th>
+                            <th style="width:90px">Status</th>
+                            <th style="width:110px">When</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for job in recent_jobs %}
+                        <tr>
+                            <td class="text-muted small">{{ job.id }}</td>
+                            <td>
+                                <span title="{{ job.command }}"
+                                      style="max-width:240px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.85rem">
+                                    {{ job.command }}
+                                </span>
+                            </td>
+                            <td>
+                                <span class="badge text-white badge-{{ job.execution_status }}" style="font-size:0.7rem">
+                                    {{ job.execution_status }}
+                                </span>
+                            </td>
+                            <td class="text-muted small">{{ job.created_at|timesince }} ago</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-muted small mb-0">No jobs yet. Enter a command above to get started.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Event log -->
+    <div class="col-lg-5">
+        <div class="cnc-card">
+            <div class="cnc-card-title"><i class="bi bi-journal-text"></i> Event Log</div>
+            {% if logs %}
+            <div style="max-height:200px;overflow-y:auto">
+                <table class="table table-sm mb-0">
+                    <tbody>
+                        {% for log in logs %}
+                        <tr>
+                            <td style="width:70px;white-space:nowrap" class="text-muted small">
+                                {{ log.timestamp|time:"H:i:s" }}
+                            </td>
+                            <td class="small">
+                                <span class="badge bg-secondary me-1" style="font-size:0.65rem">
+                                    {{ log.event_type }}
+                                </span>
+                                {{ log.message|truncatechars:55 }}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-muted small mb-0">No events logged yet.</p>
+            {% endif %}
+        </div>
+    </div>
+
+</div><!-- /row 3 -->
+{% endblock %}
+
+{% block extra_js %}
+<script>
+var currentJobId = null;
+var execInterval  = null;
+
+/* ── Example chips ─────────────────────────────── */
+function setExample(el) {
+    document.getElementById('command-input').value = el.textContent.trim();
+    document.getElementById('command-input').focus();
+}
+
+/* ── Line count label ───────────────────────────── */
+function updateLineCount(gcode) {
+    var lines = gcode.split('\n').filter(function (l) {
+        return l.trim() && !l.trim().startsWith(';');
+    }).length;
+    document.getElementById('gcode-line-count').textContent =
+        lines > 0 ? lines + ' lines' : '';
+}
+
+/* ── Validation display ─────────────────────────── */
+function showValidation(data) {
+    var box = document.getElementById('validation-box');
+    box.style.display = 'block';
+    if (data.valid) {
+        box.className = 'validation-box valid';
+        var warn = data.warnings && data.warnings.length
+            ? '<br><small>⚠ ' + data.warnings.join('; ') + '</small>' : '';
+        box.innerHTML =
+            '<i class="bi bi-check-circle-fill me-1"></i>Valid — ' +
+            data.line_count + ' executable line(s).' + warn;
+    } else {
+        box.className = 'validation-box invalid';
+        box.innerHTML =
+            '<i class="bi bi-x-circle-fill me-1"></i><strong>Invalid G-code</strong><br>' +
+            '<small>' + data.errors.join('<br>') + '</small>';
+    }
+}
+
+function clearValidation() {
+    var box = document.getElementById('validation-box');
+    box.style.display = 'none';
+    box.className = 'validation-box';
+}
+
+function showExecuteCard(visible) {
+    document.getElementById('execute-card').style.display       = visible ? 'block' : 'none';
+    document.getElementById('execute-placeholder').style.display = visible ? 'none'  : 'block';
+}
+
+/* ── Generate ───────────────────────────────────── */
+document.getElementById('generate-btn').addEventListener('click', function () {
+    var command = document.getElementById('command-input').value.trim();
+    if (!command) { showToast('Please enter a machining command', 'warning'); return; }
+
+    var btn = this;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Generating…';
+    clearValidation();
+
+    postJson('/jobs/generate/', { command: command })
+        .then(function (data) {
+            if (data.success) {
+                document.getElementById('gcode-preview').value = data.gcode;
+                currentJobId = data.job_id;
+                updateLineCount(data.gcode);
+                showExecuteCard(true);
+                showToast('G-code generated', 'success');
+            } else {
+                showToast(data.message || 'Generation failed', 'danger');
+            }
+        })
+        .catch(function () { showToast('Network error — could not reach server', 'danger'); })
+        .finally(function () {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-magic me-1"></i>Generate G-code with GPT-5';
+        });
+});
+
+/* ── Validate ───────────────────────────────────── */
+document.getElementById('validate-btn').addEventListener('click', function () {
+    var gcode = document.getElementById('gcode-preview').value.trim();
+    if (!gcode) { showToast('No G-code to validate', 'warning'); return; }
+
+    var btn = this;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+    postJson('/jobs/validate/', { gcode: gcode })
+        .then(function (data) { showValidation(data); })
+        .catch(function () { showToast('Validation request failed', 'danger'); })
+        .finally(function () {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-shield-check me-1"></i>Validate';
+        });
+});
+
+/* ── Execute ────────────────────────────────────── */
+document.getElementById('execute-btn').addEventListener('click', function () {
+    var gcode   = document.getElementById('gcode-preview').value.trim();
+    var command = document.getElementById('command-input').value.trim();
+    if (!gcode) { showToast('No G-code to execute', 'warning'); return; }
+
+    var execBtn    = this;
+    var valBtn     = document.getElementById('validate-btn');
+    var progressEl = document.getElementById('job-progress');
+
+    execBtn.disabled = true;
+    valBtn.disabled  = true;
+    progressEl.style.display = 'block';
+    clearValidation();
+
+    var bar = document.getElementById('progress-bar');
+    bar.className = 'progress-bar progress-bar-striped progress-bar-animated bg-success';
+    bar.style.width = '0%';
+    document.getElementById('progress-text').textContent   = '0 / 0 lines';
+    document.getElementById('progress-status').textContent = '';
+
+    postJson('/jobs/execute/', { gcode: gcode, command: command, job_id: currentJobId })
+        .then(function (data) {
+            if (data.success) {
+                currentJobId = data.job_id;
+                showToast('Job started — executing G-code', 'success');
+                startExecutionPolling(execBtn, valBtn);
+            } else {
+                showToast(data.message || 'Execution failed', 'danger');
+                progressEl.style.display = 'none';
+                execBtn.disabled = false;
+                valBtn.disabled  = false;
+            }
+        })
+        .catch(function () {
+            showToast('Network error during execute', 'danger');
+            progressEl.style.display = 'none';
+            execBtn.disabled = false;
+            valBtn.disabled  = false;
+        });
+});
+
+/* ── Poll execution progress ────────────────────── */
+function startExecutionPolling(execBtn, valBtn) {
+    if (execInterval) clearInterval(execInterval);
+
+    execInterval = setInterval(function () {
+        fetch('/machine/status/')
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                var pct = data.total_lines > 0
+                    ? Math.round((data.current_line / data.total_lines) * 100) : 0;
+
+                document.getElementById('progress-bar').style.width  = pct + '%';
+                document.getElementById('progress-text').textContent =
+                    data.current_line + ' / ' + data.total_lines + ' lines';
+                document.getElementById('progress-status').textContent =
+                    data.error_message || '';
+
+                if (data.status !== 'running') {
+                    clearInterval(execInterval);
+                    execInterval = null;
+                    execBtn.disabled = false;
+                    valBtn.disabled  = false;
+
+                    var bar = document.getElementById('progress-bar');
+                    if (data.status === 'connected') {
+                        bar.className    = 'progress-bar bg-success';
+                        bar.style.width  = '100%';
+                        document.getElementById('progress-text').textContent = 'Completed';
+                        showToast('Job completed successfully!', 'success');
+                    } else if (data.status === 'error') {
+                        bar.className = 'progress-bar bg-danger';
+                        showToast('Job ended: ' + (data.error_message || 'Error'), 'danger');
+                    }
+                }
+            })
+            .catch(function () {});
+    }, 1000);
+}
+
+/* ── G-code textarea listeners ──────────────────── */
+document.getElementById('gcode-preview').addEventListener('input', function () {
+    updateLineCount(this.value);
+    if (this.value.trim()) showExecuteCard(true);
+});
+
+document.getElementById('clear-gcode-btn').addEventListener('click', function () {
+    document.getElementById('gcode-preview').value          = '';
+    document.getElementById('gcode-line-count').textContent = '';
+    document.getElementById('job-progress').style.display   = 'none';
+    clearValidation();
+    showExecuteCard(false);
+    currentJobId = null;
+    if (execInterval) { clearInterval(execInterval); execInterval = null; }
+});
+
+document.getElementById('copy-gcode-btn').addEventListener('click', function () {
+    var gcode = document.getElementById('gcode-preview').value;
+    if (!gcode) return;
+    navigator.clipboard.writeText(gcode)
+        .then(function () { showToast('G-code copied to clipboard', 'success'); })
+        .catch(function () { showToast('Copy failed', 'danger'); });
+});
+
+/* ── COM port loading ───────────────────────────── */
+function loadPorts() {
+    var sel = document.getElementById('port-select');
+    fetch('/serial/ports/')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            sel.innerHTML = '';
+            if (data.ports.length === 0) {
+                sel.innerHTML = '<option value="">No ports found</option>';
+            } else {
+                data.ports.forEach(function (p) {
+                    var opt = document.createElement('option');
+                    opt.value       = p.port;
+                    opt.textContent = p.port + ' — ' + p.description;
+                    if (p.port === data.default_port) opt.selected = true;
+                    sel.appendChild(opt);
+                });
+            }
+        })
+        .catch(function () {
+            sel.innerHTML = '<option value="">Error loading ports</option>';
+        });
+}
+
+document.getElementById('refresh-ports-btn').addEventListener('click', loadPorts);
+loadPorts();
+
+/* ── Connect / Disconnect ───────────────────────── */
+document.getElementById('connect-btn').addEventListener('click', function () {
+    var port = document.getElementById('port-select').value;
+    var baud = parseInt(document.getElementById('baud-select').value, 10);
+    if (!port) { showToast('Please select a COM port', 'warning'); return; }
+
+    var btn = this;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Connecting…';
+
+    postJson('/serial/connect/', { port: port, baud_rate: baud })
+        .then(function (data) {
+            showToast(data.message, data.success ? 'success' : 'danger');
+        })
+        .catch(function () { showToast('Connection failed', 'danger'); })
+        .finally(function () {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-plug-fill"></i> Connect';
+        });
+});
+
+document.getElementById('disconnect-btn').addEventListener('click', function () {
+    postJson('/serial/disconnect/', {})
+        .then(function (data) { showToast(data.message, 'info'); })
+        .catch(function () { showToast('Error disconnecting', 'danger'); });
+});
+
+/* ── Global status polling (from cnc.js) ────────── */
+document.addEventListener('machine-status', function (e) {
+    var s = e.detail;
+
+    var dot  = document.getElementById('dash-dot');
+    var text = document.getElementById('dash-status-text');
+    var info = document.getElementById('dash-job-info');
+    var wrap = document.getElementById('dash-progress-wrap');
+    var bar  = document.getElementById('dash-progress-bar');
+    var pTxt = document.getElementById('dash-progress-text');
+
+    if (dot)  dot.className    = 'status-dot ' + s.status;
+    if (text) text.textContent = s.status.charAt(0).toUpperCase() + s.status.slice(1);
+
+    document.getElementById('dash-x').textContent = s.position.X.toFixed(2);
+    document.getElementById('dash-z').textContent = s.position.Z.toFixed(2);
+
+    if (s.status === 'running' && s.total_lines > 0) {
+        wrap.style.display = 'block';
+        var pct = Math.round((s.current_line / s.total_lines) * 100);
+        bar.style.width  = pct + '%';
+        pTxt.textContent = s.current_line + ' / ' + s.total_lines + ' lines';
+        info.textContent = 'Job #' + (s.current_job_id || '?') + ' running';
+    } else {
+        wrap.style.display = 'none';
+        info.textContent   = s.error_message || 'No active job';
+    }
+});
+</script>
+{% endblock %}

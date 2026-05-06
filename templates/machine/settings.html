@@ -1,0 +1,161 @@
+{% extends 'base.html' %}
+
+{% block title %}Settings — CNC Lathe{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="page-heading">Settings</h5>
+</div>
+
+<div class="row g-3">
+
+    <!-- Settings form -->
+    <div class="col-lg-7">
+        <div class="cnc-card">
+            <form method="post" novalidate>
+                {% csrf_token %}
+
+                <!-- AI section -->
+                <div class="settings-section">
+                    <h6><i class="bi bi-robot me-1"></i>AI Configuration</h6>
+
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold" for="api_key">OpenAI API Key</label>
+                        <input type="password" class="form-control form-control-sm" id="api_key"
+                               name="api_key" value="{{ config.api_key }}"
+                               placeholder="sk-…" autocomplete="new-password">
+                        <div class="form-text">Required to generate G-code. Never share this key.</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold" for="api_model">AI Model</label>
+                        <select class="form-select form-select-sm" id="api_model" name="api_model">
+                            <option value="gpt-5"        {% if config.api_model == "gpt-5" %}selected{% endif %}>gpt-5 (recommended)</option>
+                            <option value="gpt-4o"       {% if config.api_model == "gpt-4o" %}selected{% endif %}>gpt-4o</option>
+                            <option value="gpt-4o-mini"  {% if config.api_model == "gpt-4o-mini" %}selected{% endif %}>gpt-4o-mini</option>
+                            <option value="gpt-4-turbo"  {% if config.api_model == "gpt-4-turbo" %}selected{% endif %}>gpt-4-turbo</option>
+                            <option value="gpt-3.5-turbo"{% if config.api_model == "gpt-3.5-turbo" %}selected{% endif %}>gpt-3.5-turbo</option>
+                        </select>
+                        <div class="form-text">gpt-4o gives the most accurate G-code results.</div>
+                    </div>
+                </div>
+
+                <!-- Serial section -->
+                <div class="settings-section">
+                    <h6><i class="bi bi-hdd me-1"></i>Serial / Arduino</h6>
+
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold" for="com_port">COM Port</label>
+                        <input type="text" class="form-control form-control-sm" id="com_port"
+                               name="com_port" value="{{ config.com_port }}"
+                               placeholder="COM3  or  /dev/ttyUSB0">
+                        <div class="form-text">Windows: COM3, COM4 … &nbsp;|&nbsp; Linux: /dev/ttyUSB0</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold" for="baud_rate">Baud Rate</label>
+                        <select class="form-select form-select-sm" id="baud_rate" name="baud_rate">
+                            {% for rate in baud_rates %}
+                            <option value="{{ rate }}" {% if config.baud_rate == rate %}selected{% endif %}>
+                                {{ rate }}{% if rate == 115200 %} (GRBL default){% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Machine limits section -->
+                <div class="settings-section">
+                    <h6><i class="bi bi-rulers me-1"></i>Machine Axis Limits</h6>
+
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <label class="form-label small fw-semibold" for="x_limit">X-Axis Limit (mm)</label>
+                            <input type="number" class="form-control form-control-sm" id="x_limit"
+                                   name="x_limit" value="{{ config.x_limit }}"
+                                   min="1" max="500" step="0.1">
+                            <div class="form-text">Radial (diameter) axis</div>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small fw-semibold" for="z_limit">Z-Axis Limit (mm)</label>
+                            <input type="number" class="form-control form-control-sm" id="z_limit"
+                                   name="z_limit" value="{{ config.z_limit }}"
+                                   min="1" max="1000" step="0.1">
+                            <div class="form-text">Longitudinal axis</div>
+                        </div>
+                    </div>
+                    <div class="form-text mt-1">
+                        G-code that exceeds these limits will be rejected before execution.
+                    </div>
+                </div>
+
+                <div class="d-flex gap-2 mt-1">
+                    <button type="submit" class="btn btn-primary btn-sm">
+                        <i class="bi bi-save me-1"></i>Save Settings
+                    </button>
+                    <a href="{% url 'dashboard:index' %}" class="btn btn-outline-secondary btn-sm">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Side info -->
+    <div class="col-lg-5">
+
+        <!-- Detected ports -->
+        <div class="cnc-card">
+            <div class="cnc-card-title"><i class="bi bi-usb-symbol"></i> Detected Serial Ports</div>
+            <div id="port-list">
+                <span class="text-muted small">Scanning…</span>
+            </div>
+            <button class="btn btn-outline-secondary btn-sm mt-2" id="refresh-ports-btn">
+                <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+            </button>
+        </div>
+
+        <!-- Help -->
+        <div class="cnc-card">
+            <div class="cnc-card-title"><i class="bi bi-info-circle"></i> Setup Guide</div>
+            <ul class="small text-muted mb-0" style="padding-left:16px;line-height:1.8">
+                <li>Get your API key from
+                    <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">
+                        platform.openai.com
+                    </a>
+                </li>
+                <li>Flash GRBL firmware on the Arduino before connecting</li>
+                <li>Connect the Arduino <strong>before</strong> clicking Connect on the Dashboard</li>
+                <li>Default GRBL baud rate is <strong>115200</strong></li>
+                <li>X and Z limits are safety maximums — any G-code line exceeding them is rejected</li>
+            </ul>
+        </div>
+
+    </div>
+
+</div><!-- /.row -->
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function loadPorts() {
+    var container = document.getElementById('port-list');
+    fetch('/serial/ports/')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (data.ports.length === 0) {
+                container.innerHTML = '<span class="text-muted small">No ports detected. Is the Arduino plugged in?</span>';
+            } else {
+                container.innerHTML = data.ports.map(function (p) {
+                    return '<div class="mb-1"><span class="badge bg-dark me-1">' + p.port + '</span>' +
+                           '<small class="text-muted">' + p.description + '</small></div>';
+                }).join('');
+            }
+        })
+        .catch(function () {
+            container.innerHTML = '<span class="text-muted small">Could not load ports</span>';
+        });
+}
+
+document.getElementById('refresh-ports-btn').addEventListener('click', loadPorts);
+loadPorts();
+</script>
+{% endblock %}
