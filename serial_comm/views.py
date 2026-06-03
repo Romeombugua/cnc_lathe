@@ -2,11 +2,13 @@ import json
 
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST, require_GET
+from django.views.decorators.csrf import csrf_exempt
 
 from .controller import serial_controller
 from machine.models import MachineConfig, MachineLog
 
 
+@csrf_exempt
 @require_POST
 def connect(request):
     try:
@@ -34,6 +36,7 @@ def connect(request):
     return JsonResponse({'success': success, 'message': message})
 
 
+@csrf_exempt
 @require_POST
 def disconnect(request):
     success, message = serial_controller.disconnect()
@@ -45,6 +48,7 @@ def disconnect(request):
     return JsonResponse({'success': success, 'message': message})
 
 
+@csrf_exempt
 @require_POST
 def emergency_stop(request):
     serial_controller.emergency_stop()

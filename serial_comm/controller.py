@@ -186,7 +186,12 @@ class SerialController:
                     return
 
             # --- Wait for 'ok' acknowledgement ---
-            deadline = time.monotonic() + 30  # 30-second line timeout
+            # Synchronized M-codes (M05, M30) wait for all buffered motion to
+            # complete before GRBL responds, so they need a much longer timeout.
+            upper = line.upper()
+            is_sync = any(code in upper for code in ('M05', 'M30', 'M00', 'M01', 'M02'))
+            timeout_s = 300 if is_sync else 30
+            deadline = time.monotonic() + timeout_s
             while True:
                 if self._stop_event.is_set():
                     self._status = 'error'

@@ -151,7 +151,7 @@
             </div>
 
             <button class="btn btn-primary w-100" id="generate-btn">
-                <i class="bi bi-magic me-1"></i>Generate G-code with GPT-5
+                <i class="bi bi-magic me-1"></i>Generate G-Code
             </button>
         </div>
     </div>
@@ -334,7 +334,7 @@ document.getElementById('generate-btn').addEventListener('click', function () {
         .catch(function () { showToast('Network error — could not reach server', 'danger'); })
         .finally(function () {
             btn.disabled = false;
-            btn.innerHTML = '<i class="bi bi-magic me-1"></i>Generate G-code with GPT-5';
+            btn.innerHTML = '<i class="bi bi-magic me-1"></i>Generate G-Code';
         });
 });
 
@@ -488,6 +488,26 @@ function loadPorts() {
 document.getElementById('refresh-ports-btn').addEventListener('click', loadPorts);
 loadPorts();
 
+/* ── Connection button state ────────────────────── */
+function updateConnectionButtons(status) {
+    var connectBtn    = document.getElementById('connect-btn');
+    var disconnectBtn = document.getElementById('disconnect-btn');
+    var connected = (status === 'connected' || status === 'running');
+
+    connectBtn.disabled    = connected;
+    disconnectBtn.disabled = !connected;
+
+    if (connected) {
+        connectBtn.className    = 'btn btn-success btn-sm flex-grow-1 opacity-50';
+        connectBtn.innerHTML    = '<i class="bi bi-plug-fill"></i> Connect';
+        disconnectBtn.className = 'btn btn-danger btn-sm flex-grow-1';
+    } else {
+        connectBtn.className    = 'btn btn-success btn-sm flex-grow-1';
+        connectBtn.innerHTML    = '<i class="bi bi-plug-fill"></i> Connect';
+        disconnectBtn.className = 'btn btn-outline-secondary btn-sm flex-grow-1';
+    }
+}
+
 /* ── Connect / Disconnect ───────────────────────── */
 document.getElementById('connect-btn').addEventListener('click', function () {
     var port = document.getElementById('port-select').value;
@@ -501,17 +521,28 @@ document.getElementById('connect-btn').addEventListener('click', function () {
     postJson('/serial/connect/', { port: port, baud_rate: baud })
         .then(function (data) {
             showToast(data.message, data.success ? 'success' : 'danger');
+            if (data.success) {
+                updateConnectionButtons('connected');
+            } else {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-plug-fill"></i> Connect';
+                btn.className = 'btn btn-success btn-sm flex-grow-1';
+            }
         })
-        .catch(function () { showToast('Connection failed', 'danger'); })
-        .finally(function () {
+        .catch(function () {
+            showToast('Connection failed', 'danger');
             btn.disabled = false;
             btn.innerHTML = '<i class="bi bi-plug-fill"></i> Connect';
+            btn.className = 'btn btn-success btn-sm flex-grow-1';
         });
 });
 
 document.getElementById('disconnect-btn').addEventListener('click', function () {
     postJson('/serial/disconnect/', {})
-        .then(function (data) { showToast(data.message, 'info'); })
+        .then(function (data) {
+            showToast(data.message, 'info');
+            updateConnectionButtons('disconnected');
+        })
         .catch(function () { showToast('Error disconnecting', 'danger'); });
 });
 
@@ -528,6 +559,8 @@ document.addEventListener('machine-status', function (e) {
 
     if (dot)  dot.className    = 'status-dot ' + s.status;
     if (text) text.textContent = s.status.charAt(0).toUpperCase() + s.status.slice(1);
+
+    updateConnectionButtons(s.status);
 
     document.getElementById('dash-x').textContent = s.position.X.toFixed(2);
     document.getElementById('dash-z').textContent = s.position.Z.toFixed(2);

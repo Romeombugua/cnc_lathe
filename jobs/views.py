@@ -39,7 +39,7 @@ def generate(request):
             api_key=config.api_key,
             model=config.api_model,
             x_limit=config.x_limit,
-            z_limit=config.z_limit,
+            y_limit=config.z_limit,
         )
     except ValueError as exc:
         return JsonResponse({'success': False, 'message': str(exc)})
@@ -67,7 +67,7 @@ def validate(request):
 
     gcode = body.get('gcode', '')
     config = MachineConfig.get_config()
-    result = validate_gcode(gcode, x_limit=config.x_limit, z_limit=config.z_limit)
+    result = validate_gcode(gcode, x_limit=config.x_limit, y_limit=config.z_limit)
     return JsonResponse(result)
 
 
@@ -88,7 +88,7 @@ def execute(request):
     config = MachineConfig.get_config()
 
     # Validate before sending to hardware
-    validation = validate_gcode(gcode, x_limit=config.x_limit, z_limit=config.z_limit)
+    validation = validate_gcode(gcode, x_limit=config.x_limit, y_limit=config.z_limit)
     if not validation['valid']:
         return JsonResponse({
             'success': False,

@@ -1,18 +1,20 @@
+import re
+
 from openai import OpenAI
 
 
-def _build_prompt(command: str, x_limit: float, z_limit: float) -> str:
+def _build_prompt(command: str, x_limit: float, y_limit: float) -> str:
     return (
         f"You are a G-code generator for a hobbyist GRBL-based CNC lathe.\n\n"
         f"Machine hardware:\n"
-        f"- 2-axis (X and Z only) driven by NEMA 17 stepper motors\n"
-        f"- DC motor spindle with simple on/off control (no speed regulation)\n"
+        f"- 2-axis (X and Y only) driven by NEMA 17 stepper motors\n"
+        f"- DC motor spindle with PWM speed control (max spindle speed S1000)\n"
         f"- No coolant system\n"
         f"- No tool changer\n"
         f"- Controller: GRBL firmware on Arduino\n\n"
         f"Axis limits:\n"
         f"- X-axis maximum: {x_limit} mm (radial axis)\n"
-        f"- Z-axis maximum: {z_limit} mm (longitudinal axis)\n\n"
+        f"- Y-axis maximum: {y_limit} mm (longitudinal axis)\n\n"
         f"ALLOWED G-codes only (do not use any others):\n"
         f"  G00, G01, G02, G03  — motion\n"
         f"  G04                 — dwell\n"
@@ -21,7 +23,7 @@ def _build_prompt(command: str, x_limit: float, z_limit: float) -> str:
         f"  G90, G91            — positioning mode (use G90 absolute)\n"
         f"  G92                 — coordinate offset\n\n"
         f"ALLOWED M-codes only (do not use any others):\n"
-        f"  M03 — spindle on\n"
+        f"  M03 S<speed> — spindle on with speed (1–1000)\n"
         f"  M05 — spindle off\n"
         f"  M30 — program end\n\n"
         f"FORBIDDEN (never include these):\n"
@@ -29,11 +31,11 @@ def _build_prompt(command: str, x_limit: float, z_limit: float) -> str:
         f"  G94, G95, G96, G97  — feed/speed mode (not supported)\n"
         f"  G17, G18, G19       — plane selection (not needed)\n"
         f"  M06, M07, M08, M09  — tool change / coolant (no hardware)\n"
-        f"  T words             — tool selection (no tool changer)\n"
-        f"  S words             — spindle speed (DC motor, no control)\n\n"
+        f"  T words             — tool selection (no tool changer)\n\n"
         f"Rules:\n"
         f"- Start with G21 G90.\n"
-        f"- Use M03 to turn spindle on, M05 to turn it off.\n"
+        f"- Use M03 S1000 to turn spindle on (always include S word, max 1000), M05 to turn it off.\n"
+        f"- Use Y for the longitudinal axis, not Z.\n"
         f"- End with M05 then M30.\n"
         f"- Keep feed rates between 10 and 500 mm/min.\n"
         f"- Output raw G-code only — no explanations, no markdown, no code fences.\n\n"
@@ -46,7 +48,7 @@ def generate_gcode(
     api_key: str,
     model: str = 'gpt-5',
     x_limit: float = 100.0,
-    z_limit: float = 200.0,
+    y_limit: float = 200.0,
 ) -> str:
     """Call the OpenAI API and return raw G-code for the given machining command."""
     if not api_key:
@@ -55,7 +57,7 @@ def generate_gcode(
         )
 
     client = OpenAI(api_key=api_key)
-    prompt = _build_prompt(command, x_limit, z_limit)
+    prompt = _build_prompt(command, x_limit, y_limit)
 
     response = client.responses.create(
         model=model,
@@ -98,5 +100,11 @@ def generate_gcode(
         start = 1
         end = len(lines) - 1 if lines[-1].strip() == '```' else len(lines)
         gcode = '\n'.join(lines[start:end]).strip()
+
+    # Cap any spindle speed S-word to 1000
+    def _cap_speed(m):
+        speed = float(m.group(1))
+        return f'S{min(int(speed), 1000)}'
+    gcode = re.sub(r'\bS(\d+(?:\.\d+)?)\b', _cap_speed, gcode, flags=re.IGNORECASE)
 
     return gcode

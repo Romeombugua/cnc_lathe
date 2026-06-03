@@ -24,7 +24,7 @@ def _normalise_code(letter: str, number: str) -> str:
 def validate_gcode(
     gcode_text: str,
     x_limit: float = 100.0,
-    z_limit: float = 200.0,
+    y_limit: float = 200.0,
     max_feed_rate: float = _MAX_FEED_RATE,
 ) -> dict:
     """
@@ -57,9 +57,8 @@ def validate_gcode(
         # Remove inline comments before parsing
         line_clean = re.sub(r';.*$', '', line)
         line_clean = re.sub(r'\(.*?\)', '', line_clean).strip()
-        # Strip T-words (tool selection) and S-words (spindle speed) — hardware not present
+        # Strip T-words (tool selection) — hardware not present
         line_clean = re.sub(r'\bT\d+\b', '', line_clean, flags=re.IGNORECASE).strip()
-        line_clean = re.sub(r'\bS\d+(?:\.\d+)?\b', '', line_clean, flags=re.IGNORECASE).strip()
         if not line_clean:
             continue
 
@@ -84,10 +83,17 @@ def validate_gcode(
                     f'Line {line_num}: X{val} exceeds machine X limit of {x_limit} mm'
                 )
 
-        for val in re.findall(r'[Zz](-?\d+(?:\.\d+)?)', line_clean):
-            if abs(float(val)) > z_limit:
+        for val in re.findall(r'[Yy](-?\d+(?:\.\d+)?)', line_clean):
+            if abs(float(val)) > y_limit:
                 errors.append(
-                    f'Line {line_num}: Z{val} exceeds machine Z limit of {z_limit} mm'
+                    f'Line {line_num}: Y{val} exceeds machine Y limit of {y_limit} mm'
+                )
+
+        # --- Spindle speed checks ---
+        for val in re.findall(r'[Ss](\d+(?:\.\d+)?)', line_clean):
+            if float(val) > 1000:
+                errors.append(
+                    f'Line {line_num}: Spindle speed S{val} exceeds maximum of 1000'
                 )
 
         # --- Feed rate checks ---
