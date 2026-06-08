@@ -188,6 +188,94 @@ def _build_prompt(command: str, x_limit: float, y_limit: float) -> str:
     )
 
 
+def extract_machining_params(
+    user_text: str,
+    api_key: str,
+    model: str = 'gpt-4o',
+) -> dict:
+    """
+    Use the AI to extract machining profile parameters from a natural language description.
+
+    Returns a dict with any of:
+        d_stock    (float) — stock diameter in mm
+        l_stickout (float) — stickout length in mm
+        d_target   (float) — target diameter in mm
+        l_cut      (float) — turning length in mm
+        missing    (list[str]) — parameter names that could not be extracted
+        clarification (str) — human-readable note if the AI needs more info
+    """
+    if not api_key:
+        raise ValueError(
+            'OpenAI API key is not configured. Please set it in the Settings page.'
+        )
+
+    system_instructions = (
+        'You are a CNC parameter extraction assistant. '
+        'The user will describe a turning operation in natural language. '
+        'Extract these four machining parameters and respond with ONLY a JSON object — no prose:\n'
+        '  d_stock    : stock (raw) diameter in mm (number or null)\n'
+        '  l_stickout : bar stickout length in mm (number or null)\n'
+        '  d_target   : target (finished) diameter in mm (number or null)\n'
+        '  l_cut      : length of material to be turned in mm (number or null)\n'
+        'Use null for any parameter not mentioned. '
+        'If a diameter is given as a radius, double it. '
+        'If units are inches, convert to mm (1 in = 25.4 mm). '
+        'Also include a "clarification" string (or empty string) if you need the user to provide missing values.'
+    )
+
+    import json as _json
+
+    client = OpenAI(api_key=api_key)
+    response = client.responses.create(
+        model=model,
+        instructions=system_instructions,
+        input=user_text,
+    )
+
+    # Extract text — try convenience property first, then traverse output[]
+    raw = (response.output_text or '').strip()
+    if not raw:
+        try:
+            for item in response.output:
+                if getattr(item, 'type', None) == 'message':
+                    for part in item.content:
+                        text = getattr(part, 'text', None)
+                        if text:
+                            raw = text.strip()
+                            break
+                if raw:
+                    break
+        except Exception:
+            pass
+
+    if not raw:
+        raise ValueError('AI returned an empty response. Try rephrasing your description.')
+
+    # Strip accidental markdown fences
+    if raw.startswith('```'):
+        lines = raw.splitlines()
+        start = 1
+        end = len(lines) - 1 if lines[-1].strip().startswith('```') else len(lines)
+        raw = '\n'.join(lines[start:end]).strip()
+
+    try:
+        params = _json.loads(raw)
+    except _json.JSONDecodeError:
+        # Try to find a JSON object embedded in any surrounding text
+        m = re.search(r'\{.*\}', raw, re.DOTALL)
+        if m:
+            params = _json.loads(m.group())
+        else:
+            raise ValueError(f'AI returned unexpected format: {raw[:200]}')
+
+    # Identify which params are missing
+    keys = ['d_stock', 'l_stickout', 'd_target', 'l_cut']
+    missing = [k for k in keys if params.get(k) is None]
+    params['missing'] = missing
+
+    return params
+
+
 def generate_gcode(
     command: str,
     api_key: str,

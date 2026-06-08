@@ -415,6 +415,15 @@ class SerialController:
                 if self._serial and self._serial.in_waiting:
                     response = self._serial.readline().decode('utf-8', errors='replace').strip()
                     if response == 'ok':
+                        # Send $X to clear any lingering alarm state before
+                        # marking homing complete (some GRBL configs need this)
+                        try:
+                            self._serial.write(b'$X\n')
+                            self._serial.flush()
+                            time.sleep(0.1)
+                            self._serial.reset_input_buffer()
+                        except Exception:
+                            pass
                         self._status = 'connected'
                         self._homed = True
                         self._dry_run = True   # Always reset dry-run after homing
@@ -437,8 +446,101 @@ class SerialController:
         self._status = 'error'
         self._error_message = 'Homing cycle timed out'
 
+    def jog(self, axis: str, direction: int, distance: float, feed: float = 200.0) -> tuple[bool, str]:
+        """
+        Move one step using incremental G-code (G91 → G01 → G90).
+        Compatible with all GRBL versions — avoids the $J= jog command
+        which some GRBL builds reject with error:3.
+        """
+        if self._status not in ('connected',):
+            return False, 'Machine must be idle and connected to jog'
+        if self._job_thread and self._job_thread.is_alive():
+            return False, 'Cannot jog while a job is running'
+        axis = axis.upper()
+        if axis not in ('X', 'Y'):
+            return False, f'Unknown axis: {axis}'
+        signed_dist = direction * abs(distance)
+        # Three-line sequence: switch to incremental, move, restore absolute
+        cmds = [
+            b'G91\n',
+            f'G01 {axis}{signed_dist:.3f} F{feed:.0f}\n'.encode(),
+            b'G90\n',
+        ]
+        with self._serial_lock:
+            if not (self._serial and self._serial.is_open):
+                return False, 'Serial connection lost'
+            for cmd in cmds:
+                try:
+                    self._serial.write(cmd)
+                    self._serial.flush()
+                except Exception as exc:
+                    return False, str(exc)
+                # Wait for 'ok' after each line
+                deadline = time.monotonic() + 0.5
+                while time.monotonic() < deadline:
+                    if self._serial.in_waiting:
+                        try:
+                            resp = self._serial.readline().decode('utf-8', errors='replace').strip()
+                        except Exception as exc:
+                            return False, str(exc)
+                        if resp == 'ok':
+                            break
+                        if resp.startswith('error'):
+                            # Always restore absolute mode before returning
+                            try:
+                                self._serial.write(b'G90\n')
+                                self._serial.flush()
+                            except Exception:
+                                pass
+                            return False, f'GRBL rejected jog: {resp}'
+                        if resp.startswith('<'):
+                            continue   # status report — ignore
+                    time.sleep(0.005)
+        return True, f'Jogged {axis} {signed_dist:+.3f} mm'
+
+    def cancel_jog(self) -> None:
+        """Send GRBL jog-cancel byte (0x85) to stop a jog in progress."""
+        with self._serial_lock:
+            if self._serial and self._serial.is_open:
+                try:
+                    self._serial.write(b'\x85')
+                    self._serial.flush()
+                except Exception:
+                    pass
+
+    def set_work_origin_and_retract(self, approach_x: float = 15.0) -> tuple[bool, str]:
+        """
+        Touch-off: set Y=0 at the current tool position (front face of workpiece),
+        set the fixed X spindle-centre offset, activate G54, then retract to a
+        safe staging position clear of the stock.
+
+        The operator must manually jog the tool to the front face before calling
+        this method.  approach_x should be stock_radius + 6 mm.
+        """
+        if self._status == 'disconnected':
+            return False, 'Machine is not connected'
+        if self._job_thread and self._job_thread.is_alive():
+            return False, 'Another operation is in progress'
+        lines = [
+            'G10 L2 P1 X-69.000',          # Fix X work offset (spindle-centre alignment)
+            'G10 L20 P1 Y0',                # Zero Y at current tool position (front face)
+            'G54',                           # Activate G54 work coordinate system
+            f'G00 X{approach_x:.3f} Y5.000',  # Retract: clearance X, 5 mm in front of face
+        ]
+        self._stop_event.clear()
+        self._status = 'syncing'
+        self._error_message = ''
+        self._job_thread = threading.Thread(
+            target=self._run_command_sequence,
+            args=(lines, 'Work origin set at front face — tool retracted to safe position'),
+            kwargs={'flag_synced': True},
+            daemon=True,
+        )
+        self._job_thread.start()
+        return True, 'Setting work origin and retracting…'
+
     def sync_workpiece(self, l_stickout: float) -> tuple[bool, str]:
-        """Phase II+III: set G54 work offset and move to safe staging position."""
+        """Legacy automatic sync (kept for backward compatibility — prefer set_work_origin_and_retract)."""
         if self._status == 'disconnected':
             return False, 'Machine is not connected'
         if self._job_thread and self._job_thread.is_alive():
@@ -447,7 +549,7 @@ class SerialController:
         lines = [
             f'G10 L2 P1 X-69.000 Y{work_y_offset:.3f}',
             'G54',
-            'G00 X15.000 Y5.000',   # Phase III: safe staging position
+            'G00 X15.000 Y5.000',
         ]
         self._stop_event.clear()
         self._status = 'syncing'

@@ -101,12 +101,27 @@
             <div class="step-header">
                 <div class="step-badge locked" id="step3-badge">3</div>
                 <div class="flex-grow-1">
-                    <div class="step-title">Measure &amp; Sync Workpiece</div>
-                    <div class="step-desc">Enter the physical dimensions of your stock, then click Sync. The machine will set its work origin at the front face of the bar and move the tool to a safe starting position.</div>
+                    <div class="step-title">Measure &amp; Set Work Origin</div>
+                    <div class="step-desc">Enter the dimensions below, then <strong>manually jog</strong> the tool tip to touch the front face of the workpiece. Click <em>Set Work Origin Here</em> — the machine will record that point as Y=0 and automatically retract to a safe distance.</div>
                 </div>
                 <span class="step-check" id="step3-check"><i class="bi bi-check-circle-fill"></i></span>
             </div>
             <div class="step-body mt-3">
+
+                <!-- Natural-language input -->
+                <div class="mb-3 p-3 rounded" style="background:var(--cnc-bg);border:1px solid var(--cnc-border)">
+                    <label class="form-label small fw-semibold mb-1">
+                        <i class="bi bi-chat-left-text me-1"></i>Describe in plain English <span class="text-muted fw-normal">(optional — fills the fields below)</span>
+                    </label>
+                    <div class="input-group input-group-sm">
+                        <textarea class="form-control" id="nl-input" rows="2"
+                            placeholder="e.g. I have a 40mm diameter bar sticking out 90mm. Turn it down to 25mm for a 60mm length."></textarea>
+                        <button class="btn btn-outline-primary" id="nl-extract-btn" title="Extract parameters with AI">
+                            <i class="bi bi-magic"></i>
+                        </button>
+                    </div>
+                    <div id="nl-feedback" class="mt-2 small" style="display:none"></div>
+                </div>
 
                 <div class="profile-input-group mb-3">
                     <div class="param-input-block">
@@ -119,13 +134,13 @@
                         <div class="derived-hint">1 â€“ 185 mm</div>
                     </div>
                     <div class="param-input-block">
-                        <label for="l-stickout">Stickout Length <span class="text-muted fw-normal">(how far bar overhangs chuck)</span></label>
+                        <label>Stickout Length <span class="text-muted fw-normal">(fixed)</span></label>
                         <div class="input-group input-group-sm">
-                            <input type="number" class="form-control" id="l-stickout"
-                                   min="1" max="110" step="0.1" placeholder="e.g. 60">
+                            <input type="number" class="form-control bg-light" id="l-stickout"
+                                   value="30" readonly>
                             <span class="input-group-text">mm</span>
                         </div>
-                        <div class="derived-hint">1 â€“ 110 mm</div>
+                        <div class="derived-hint">Hardcoded to 30 mm</div>
                     </div>
                     <div class="param-input-block">
                         <label for="d-target">Target Diameter <span class="text-muted fw-normal">(finished width after turning)</span></label>
@@ -163,24 +178,74 @@
                     </div>
                 </div>
 
-                <!-- Derived values -->
+
+                <!-- Derived value: approach clearance -->
                 <div class="row g-2 mb-3">
                     <div class="col-6">
                         <div class="axis-block py-2 text-center">
                             <div class="axis-label">Approach clearance (X)</div>
-                            <div class="axis-value" style="font-size:1rem" id="derived-x-approach">â€”</div>
-                        </div>
-                    </div>
-                    <div class="col-6">
-                        <div class="axis-block py-2 text-center">
-                            <div class="axis-label">G54 Y offset</div>
-                            <div class="axis-value" style="font-size:1rem" id="derived-y-offset">â€”</div>
+                            <div class="axis-value" style="font-size:1rem" id="derived-x-approach">&mdash;</div>
                         </div>
                     </div>
                 </div>
 
+                <!-- Jog controls -->
+                <div class="mb-3 p-3 rounded" style="background:var(--cnc-bg);border:1px solid var(--cnc-border)">
+                    <div class="small fw-semibold mb-2"><i class="bi bi-joystick me-1"></i>Jog Tool to Front Face</div>
+
+                    <!-- Step size selector -->
+                    <div class="d-flex align-items-center gap-2 mb-2">
+                        <span class="small text-muted">Step:</span>
+                        <div class="btn-group btn-group-sm" id="jog-step-group" role="group">
+                            <input type="radio" class="btn-check" name="jog-step" id="jog-01" value="0.1" autocomplete="off">
+                            <label class="btn btn-outline-secondary" for="jog-01">0.1</label>
+                            <input type="radio" class="btn-check" name="jog-step" id="jog-05" value="0.5" autocomplete="off">
+                            <label class="btn btn-outline-secondary" for="jog-05">0.5</label>
+                            <input type="radio" class="btn-check" name="jog-step" id="jog-10" value="1.0" autocomplete="off" checked>
+                            <label class="btn btn-outline-secondary" for="jog-10">1.0</label>
+                            <input type="radio" class="btn-check" name="jog-step" id="jog-50" value="5.0" autocomplete="off">
+                            <label class="btn btn-outline-secondary" for="jog-50">5.0</label>
+                            <input type="radio" class="btn-check" name="jog-step" id="jog-100" value="10.0" autocomplete="off">
+                            <label class="btn btn-outline-secondary" for="jog-100">10</label>
+                            <input type="radio" class="btn-check" name="jog-step" id="jog-200" value="20.0" autocomplete="off">
+                            <label class="btn btn-outline-secondary" for="jog-200">20</label>
+                        </div>
+                        <span class="small text-muted">mm</span>
+                    </div>
+
+                    <!-- Directional buttons -->
+                    <div class="d-flex flex-column align-items-start gap-1" style="max-width:240px">
+                        <button class="btn btn-outline-secondary btn-sm w-100" id="jog-yp"
+                                title="Move away from chuck (+Y)">
+                            <i class="bi bi-arrow-up"></i> Y+
+                            <small class="text-muted ms-1">away from chuck</small>
+                        </button>
+                        <div class="d-flex gap-1 w-100">
+                            <button class="btn btn-outline-secondary btn-sm flex-grow-1" id="jog-xm"
+                                    title="Move toward spindle axis (-X)">
+                                <i class="bi bi-arrow-left"></i> X&minus;
+                            </button>
+                            <div class="flex-grow-0 px-3 d-flex align-items-center justify-content-center"
+                                 style="color:#555"><i class="bi bi-record-circle"></i></div>
+                            <button class="btn btn-outline-secondary btn-sm flex-grow-1" id="jog-xp"
+                                    title="Move away from spindle axis (+X)">
+                                X+ <i class="bi bi-arrow-right"></i>
+                            </button>
+                        </div>
+                        <button class="btn btn-outline-warning btn-sm w-100 text-dark" id="jog-ym"
+                                title="Move toward front face (-Y)">
+                            <i class="bi bi-arrow-down"></i> Y&minus;
+                            <small class="ms-1">toward front face</small>
+                        </button>
+                    </div>
+                    <div class="mt-2 small text-muted">
+                        <i class="bi bi-info-circle me-1"></i>Jog <strong>Y&minus;</strong> until the tool tip just touches the front face, then click the button below.
+                    </div>
+                </div>
+
+                <!-- Set work origin button -->
                 <button class="btn btn-warning btn-sm text-dark" id="btn-sync" disabled>
-                    <i class="bi bi-arrow-repeat me-1"></i>Sync &amp; Move to Safe Zone
+                    <i class="bi bi-crosshair me-1"></i>Set Work Origin Here &amp; Retract
                 </button>
                 <span class="ms-2 small text-muted" id="sync-hint">Home machine first</span>
             </div>
@@ -424,34 +489,80 @@ function markStepLocked(n) {
 }
 
 /* PROFILE INPUTS */
+
+/* ── Natural-language parameter extraction ── */
+document.getElementById('nl-extract-btn').addEventListener('click', function () {
+    var text = document.getElementById('nl-input').value.trim();
+    var feedback = document.getElementById('nl-feedback');
+    if (!text) { showToast('Please describe the operation first', 'warning'); return; }
+
+    var btn = this;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+    feedback.style.display = 'none';
+
+    postJson('/jobs/parse-nl/', { text: text })
+        .then(function (data) {
+            if (!data.success) {
+                showToast(data.message || 'Extraction failed', 'danger');
+                return;
+            }
+            var filled = [];
+            var map = { d_stock: 'd-stock', d_target: 'd-target', l_cut: 'l-cut' };
+            Object.keys(map).forEach(function (key) {
+                if (data[key] !== null && data[key] !== undefined) {
+                    document.getElementById(map[key]).value = data[key];
+                    filled.push(key.replace('_', ' '));
+                }
+            });
+            updateDerived();
+            if (filled.length) {
+                showToast('Filled: ' + filled.join(', '), 'success');
+            }
+            if (data.clarification) {
+                feedback.style.display = 'block';
+                feedback.className = 'mt-2 small text-warning';
+                feedback.textContent = '⚠ ' + data.clarification;
+            } else if (data.missing && data.missing.length) {
+                feedback.style.display = 'block';
+                feedback.className = 'mt-2 small text-muted';
+                feedback.textContent = 'Still needed: ' + data.missing.join(', ').replace(/_/g, ' ');
+            }
+        })
+        .catch(function (err) { showToast('Error: ' + (err && err.message ? err.message : err), 'danger'); })
+        .finally(function () {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-magic"></i>';
+        });
+});
+
+var L_STICKOUT = 30;
+
 function updateDerived() {
-    var dStock    = parseFloat(document.getElementById('d-stock').value);
-    var lStickout = parseFloat(document.getElementById('l-stickout').value);
+    var dStock = parseFloat(document.getElementById('d-stock').value);
+    var maxCut = (L_STICKOUT - 0.5).toFixed(1);
+    document.getElementById('l-cut').max = maxCut;
+    document.getElementById('l-cut-hint').textContent = 'Must be 0.5 - ' + maxCut + ' mm';
+    document.getElementById('derived-y-offset').textContent = (-120 + L_STICKOUT).toFixed(3) + ' mm';
     if (!isNaN(dStock)) {
         var maxTarget = (dStock - 0.5).toFixed(1);
         document.getElementById('d-target').max = maxTarget;
         document.getElementById('d-target-hint').textContent = 'Must be 0.5 - ' + maxTarget + ' mm';
         document.getElementById('derived-x-approach').textContent = (dStock / 2 + 6).toFixed(3) + ' mm';
     }
-    if (!isNaN(lStickout)) {
-        var maxCut = (lStickout - 0.5).toFixed(1);
-        document.getElementById('l-cut').max = maxCut;
-        document.getElementById('l-cut-hint').textContent = 'Must be 0.5 - ' + maxCut + ' mm';
-        document.getElementById('derived-y-offset').textContent = (-120 + lStickout).toFixed(3) + ' mm';
-    }
     refreshStepButtons();
 }
-['d-stock', 'l-stickout', 'd-target', 'l-cut'].forEach(function (id) {
+['d-stock', 'd-target', 'l-cut'].forEach(function (id) {
     document.getElementById(id).addEventListener('input', updateDerived);
 });
 
 function profileValid() {
-    var dStock    = parseFloat(document.getElementById('d-stock').value);
-    var lStickout = parseFloat(document.getElementById('l-stickout').value);
-    var dTarget   = parseFloat(document.getElementById('d-target').value);
-    var lCut      = parseFloat(document.getElementById('l-cut').value);
-    return (dStock >= 1 && dStock <= 185 && lStickout >= 1 && lStickout <= 110 &&
-            dTarget >= 0.5 && dTarget <= dStock - 0.5 && lCut >= 0.5 && lCut <= lStickout - 0.5);
+    var dStock  = parseFloat(document.getElementById('d-stock').value);
+    var dTarget = parseFloat(document.getElementById('d-target').value);
+    var lCut    = parseFloat(document.getElementById('l-cut').value);
+    return (dStock >= 1 && dStock <= 185 &&
+            dTarget >= 0.5 && dTarget <= dStock - 0.5 &&
+            lCut >= 0.5 && lCut <= L_STICKOUT - 0.5);
 }
 
 /* BUTTON STATE REFRESH */
@@ -470,6 +581,11 @@ function refreshStepButtons() {
     if (phaseHome) markStepDone(2); else if (idle) markStepActive(2); else markStepLocked(2);
 
     var canSync = idle && phaseHome && profileValid();
+    var canJog  = idle && phaseHome;
+    ['jog-yp', 'jog-ym', 'jog-xp', 'jog-xm'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.disabled = !canJog;
+    });
     document.getElementById('btn-sync').disabled = !canSync;
     document.getElementById('sync-hint').textContent =
         !idle ? '' : !phaseHome ? 'Home machine first' : !profileValid() ? 'Fill in all four measurements' : '';
@@ -562,8 +678,8 @@ function pollStatus() {
                     phaseSync = true;
                     syncingInitiated = false;
                     document.getElementById('btn-sync').innerHTML =
-                        '<i class="bi bi-arrow-repeat me-1"></i>Sync &amp; Move to Safe Zone';
-                    showToast('Workpiece synced \u2014 tool at safe zone', 'success');
+                        '<i class="bi bi-crosshair me-1"></i>Set Work Origin Here &amp; Retract';
+                    showToast('Work origin set \u2014 tool at safe position', 'success');
                 }
                 // Backend reset phases (e.g. after reconnect)
                 if (!backendHomed && phaseHome)  { phaseHome = false; phaseSync = false; }
@@ -579,8 +695,8 @@ function pollStatus() {
                 } else if (syncingInitiated) {
                     syncingInitiated = false;
                     document.getElementById('btn-sync').innerHTML =
-                        '<i class="bi bi-arrow-repeat me-1"></i>Sync &amp; Move to Safe Zone';
-                    showError('sync-error', data.error_message || 'Sync failed');
+                        '<i class="bi bi-crosshair me-1"></i>Set Work Origin Here &amp; Retract';
+                    showError('sync-error', data.error_message || 'Origin setting failed');
                 }
             }
 
@@ -689,30 +805,47 @@ document.getElementById('btn-home').addEventListener('click', function () {
         });
 });
 
-/* STEP 3 -- SYNC */
+/* STEP 3 -- JOG */
+function getJogStep() {
+    var checked = document.querySelector('input[name="jog-step"]:checked');
+    return checked ? parseFloat(checked.value) : 1.0;
+}
+function sendJog(axis, direction) {
+    var step = getJogStep();
+    postJson('/serial/jog/', { axis: axis, direction: direction, distance: step, feed: 200 })
+        .then(function (data) {
+            if (!data.success) { showToast(data.message || 'Jog failed', 'danger'); }
+        })
+        .catch(function (err) { showToast('Jog error: ' + (err && err.message ? err.message : err), 'danger'); });
+}
+document.getElementById('jog-yp').addEventListener('click', function () { sendJog('Y',  1); });
+document.getElementById('jog-ym').addEventListener('click', function () { sendJog('Y', -1); });
+document.getElementById('jog-xp').addEventListener('click', function () { sendJog('X',  1); });
+document.getElementById('jog-xm').addEventListener('click', function () { sendJog('X', -1); });
+
+/* STEP 3 -- SET WORK ORIGIN */
 document.getElementById('btn-sync').addEventListener('click', function () {
     document.getElementById('sync-error').style.display = 'none';
-    var lStickout = parseFloat(document.getElementById('l-stickout').value);
-    if (isNaN(lStickout)) { showError('sync-error', 'Enter Stickout Length first.'); return; }
+    var dStock = parseFloat(document.getElementById('d-stock').value);
     var btn = this;
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Syncing...';
-    postJson('/serial/sync/', { l_stickout: lStickout })
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Setting origin&hellip;';
+    postJson('/serial/set-origin/', { d_stock: isNaN(dStock) ? 30 : dStock })
         .then(function (data) {
             if (data.success) {
                 syncingInitiated = true;
-                showToast('Syncing -- tool moving to safe zone', 'info');
-                btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Moving to safe zone...';
+                showToast('Origin set \u2014 retracting to safe position', 'info');
+                btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Retracting&hellip;';
             } else {
                 showError('sync-error', data.message);
                 btn.disabled = false;
-                btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Sync &amp; Move to Safe Zone';
+                btn.innerHTML = '<i class="bi bi-crosshair me-1"></i>Set Work Origin Here &amp; Retract';
             }
         })
         .catch(function (err) {
             showError('sync-error', 'Request failed: ' + err);
             btn.disabled = false;
-            btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Sync &amp; Move to Safe Zone';
+            btn.innerHTML = '<i class="bi bi-crosshair me-1"></i>Set Work Origin Here &amp; Retract';
         });
 });
 
@@ -728,7 +861,7 @@ document.getElementById('btn-generate').addEventListener('click', function () {
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Generating with AI...';
     var body = {
         d_stock:    parseFloat(document.getElementById('d-stock').value),
-        l_stickout: parseFloat(document.getElementById('l-stickout').value),
+        l_stickout: L_STICKOUT,
         d_target:   parseFloat(document.getElementById('d-target').value),
         l_cut:      parseFloat(document.getElementById('l-cut').value),
     };

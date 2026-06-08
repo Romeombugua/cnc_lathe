@@ -15,7 +15,9 @@ async function postJson(url, data) {
         body: JSON.stringify(data),
     });
     if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        let detail = '';
+        try { const j = await response.json(); detail = j.message || j.detail || ''; } catch (_) {}
+        throw new Error('HTTP ' + response.status + (detail ? ' — ' + detail : ''));
     }
     return response.json();
 }

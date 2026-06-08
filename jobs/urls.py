@@ -12,4 +12,5 @@ urlpatterns = [
     path('<int:job_id>/detail/', views.job_detail, name='job_detail'),
     path('cycle/', views.cycle, name='cycle'),
     path('generate-profile/', views.generate_profile, name='generate_profile'),
+    path('parse-nl/', views.parse_natural_language, name='parse_natural_language'),
 ]

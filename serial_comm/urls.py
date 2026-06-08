@@ -12,4 +12,6 @@ urlpatterns = [
     path('sync/', views.sync, name='sync'),
     path('dry-run/', views.set_dry_run, name='set_dry_run'),
     path('cancel-job/', views.cancel_job, name='cancel_job'),
+    path('jog/', views.jog, name='jog'),
+    path('set-origin/', views.set_work_origin, name='set_work_origin'),
 ]

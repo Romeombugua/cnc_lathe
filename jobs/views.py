@@ -6,7 +6,7 @@ from django.views.decorators.http import require_POST, require_GET
 
 from .models import Job
 from machine.models import MachineConfig, MachineLog
-from gpt_engine.gpt_client import generate_gcode
+from gpt_engine.gpt_client import generate_gcode, extract_machining_params
 from gpt_engine.validator import validate_gcode
 from serial_comm.controller import serial_controller
 
@@ -151,18 +151,17 @@ def generate_profile(request):
 
     try:
         d_stock = float(body['d_stock'])
-        l_stickout = float(body['l_stickout'])
         d_target = float(body['d_target'])
         l_cut = float(body['l_cut'])
     except (KeyError, ValueError, TypeError) as exc:
         return JsonResponse({'success': False, 'message': f'Invalid parameter: {exc}'})
 
+    l_stickout = 30.0  # hardcoded — user must not overshoot
+
     # Strict input validation per spec §4.1
     errors = []
     if not (1.0 <= d_stock <= 185.0):
         errors.append('D_stock must be 1–185 mm')
-    if not (1.0 <= l_stickout <= 110.0):
-        errors.append('L_stickout must be 1–110 mm')
     if not (0.5 <= d_target <= d_stock - 0.5):
         errors.append(f'D_target must be 0.5–{d_stock - 0.5:.1f} mm')
     if not (0.5 <= l_cut <= l_stickout - 0.5):
@@ -219,3 +218,37 @@ def job_detail(request, job_id):
         'created_at': job.created_at.isoformat(),
         'error_message': job.error_message,
     })
+
+
+@require_POST
+def parse_natural_language(request):
+    """Extract machining profile parameters from a natural language description."""
+    try:
+        body = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({'success': False, 'message': 'Invalid request body'})
+
+    user_text = body.get('text', '').strip()
+    if not user_text:
+        return JsonResponse({'success': False, 'message': 'No text provided'})
+
+    config = MachineConfig.get_config()
+    if not config.api_key:
+        return JsonResponse({
+            'success': False,
+            'message': 'OpenAI API key not configured — please go to Settings.',
+        })
+
+    try:
+        params = extract_machining_params(
+            user_text=user_text,
+            api_key=config.api_key,
+            model=config.api_model,
+        )
+    except ValueError as exc:
+        return JsonResponse({'success': False, 'message': str(exc)})
+    except Exception as exc:
+        return JsonResponse({'success': False, 'message': f'AI error: {exc}'})
+
+    return JsonResponse({'success': True, **params})
+
