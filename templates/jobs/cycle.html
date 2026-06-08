@@ -1,0 +1,593 @@
+{% extends 'base.html' %}
+
+{% block title %}Cycle Control — CNC Lathe{% endblock %}
+
+{% block content %}
+
+<!-- ── Dry-run banner ────────────────────────────────────── -->
+<div id="dry-run-banner">
+    <i class="bi bi-exclamation-triangle-fill"></i>
+    DRY RUN ACTIVE — Spindle will NOT engage during this cycle
+</div>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="page-heading"><i class="bi bi-sliders me-2"></i>Cycle Control</h5>
+    <div class="form-check form-switch mb-0">
+        <input class="form-check-input" type="checkbox" id="dry-run-toggle" checked>
+        <label class="form-check-label small fw-semibold" for="dry-run-toggle">Dry Run</label>
+    </div>
+</div>
+
+<!-- ── Row 1: Profile inputs | Live position ─────────────── -->
+<div class="row g-3 mb-3">
+
+    <!-- Profile inputs -->
+    <div class="col-lg-6">
+        <div class="cnc-card h-100">
+            <div class="cnc-card-title"><i class="bi bi-rulers"></i> Workpiece Profile (§4.1)</div>
+
+            <div class="profile-input-group mb-3">
+                <div class="param-input-block">
+                    <label for="d-stock">D_stock — Stock Diameter</label>
+                    <div class="input-group input-group-sm">
+                        <input type="number" class="form-control" id="d-stock"
+                               min="1" max="185" step="0.1" placeholder="1–185">
+                        <span class="input-group-text">mm</span>
+                    </div>
+                    <div class="derived-hint">Radius ≤ 92.5 mm (within X limit)</div>
+                </div>
+                <div class="param-input-block">
+                    <label for="l-stickout">L_stickout — Stickout Length</label>
+                    <div class="input-group input-group-sm">
+                        <input type="number" class="form-control" id="l-stickout"
+                               min="1" max="110" step="0.1" placeholder="1–110">
+                        <span class="input-group-text">mm</span>
+                    </div>
+                    <div class="derived-hint">Max 110 mm (Y-axis safe travel)</div>
+                </div>
+                <div class="param-input-block">
+                    <label for="d-target">D_target — Target Diameter</label>
+                    <div class="input-group input-group-sm">
+                        <input type="number" class="form-control" id="d-target"
+                               min="0.5" step="0.1" placeholder="0.5 – D_stock−0.5">
+                        <span class="input-group-text">mm</span>
+                    </div>
+                    <div class="derived-hint" id="d-target-hint">Must be &lt; D_stock</div>
+                </div>
+                <div class="param-input-block">
+                    <label for="l-cut">L_cut — Turning Length</label>
+                    <div class="input-group input-group-sm">
+                        <input type="number" class="form-control" id="l-cut"
+                               min="0.5" step="0.1" placeholder="0.5 – L_stickout−0.5">
+                        <span class="input-group-text">mm</span>
+                    </div>
+                    <div class="derived-hint" id="l-cut-hint">Must be &lt; L_stickout</div>
+                </div>
+            </div>
+
+            <!-- Derived values display -->
+            <div class="row g-2 text-center mt-1">
+                <div class="col-6">
+                    <div class="axis-block py-2">
+                        <div class="axis-label">X_approach</div>
+                        <div class="axis-value small" id="derived-x-approach">—</div>
+                    </div>
+                </div>
+                <div class="col-6">
+                    <div class="axis-block py-2">
+                        <div class="axis-label">Work Y Offset</div>
+                        <div class="axis-value small" id="derived-y-offset">—</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Live position panel -->
+    <div class="col-lg-6">
+        <div class="cnc-card h-100">
+            <div class="cnc-card-title">
+                <i class="bi bi-crosshair"></i> Live Position
+                <span class="ms-auto grbl-state-badge" id="grbl-state-badge">—</span>
+            </div>
+
+            <div class="position-panel">
+                <div class="row g-3 mb-2">
+                    <div class="col-6">
+                        <div class="pos-label">MPos X (radial)</div>
+                        <div class="pos-value" id="mpos-x">—</div>
+                    </div>
+                    <div class="col-6">
+                        <div class="pos-label">MPos Y (longitudinal)</div>
+                        <div class="pos-value" id="mpos-y">—</div>
+                    </div>
+                </div>
+                <div class="row g-3 mb-3">
+                    <div class="col-6">
+                        <div class="pos-label">WPos X (work)</div>
+                        <div class="pos-value wpos" id="wpos-x">—</div>
+                    </div>
+                    <div class="col-6">
+                        <div class="pos-label">WPos Y (work)</div>
+                        <div class="pos-value wpos" id="wpos-y">—</div>
+                    </div>
+                </div>
+                <div class="row g-3">
+                    <div class="col-6">
+                        <div class="pos-label">Feed</div>
+                        <div class="pos-value" id="grbl-feed">— mm/min</div>
+                    </div>
+                    <div class="col-6">
+                        <div class="pos-label">Speed</div>
+                        <div class="pos-value" id="grbl-speed">— RPM</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-3 d-flex align-items-center gap-2">
+                <span class="status-dot disconnected" id="cycle-status-dot"></span>
+                <span id="cycle-status-text" class="small fw-semibold">Disconnected</span>
+                <span class="ms-auto small text-muted" id="phase-hint">Connect the machine to begin</span>
+            </div>
+        </div>
+    </div>
+
+</div><!-- /row 1 -->
+
+<!-- ── Row 2: Phase control buttons ──────────────────────── -->
+<div class="cnc-card mb-3">
+    <div class="cnc-card-title"><i class="bi bi-list-ol"></i> Startup Sequence (§4.2)</div>
+
+    <div class="phase-row">
+
+        <!-- Phase I -->
+        <div class="phase-step">
+            <div class="phase-step-label" id="phase1-label">Phase I</div>
+            <button class="btn btn-outline-primary btn-sm w-100" id="btn-home" disabled>
+                <i class="bi bi-house-door-fill me-1"></i>Initialize &amp; Home
+            </button>
+        </div>
+
+        <div class="phase-connector" id="conn-1-2"></div>
+
+        <!-- Phase II -->
+        <div class="phase-step">
+            <div class="phase-step-label" id="phase2-label">Phase II</div>
+            <button class="btn btn-outline-warning btn-sm w-100" id="btn-sync" disabled>
+                <i class="bi bi-arrow-repeat me-1"></i>Sync Workpiece
+            </button>
+        </div>
+
+        <div class="phase-connector" id="conn-2-3"></div>
+
+        <!-- Phase III (auto) -->
+        <div class="phase-step">
+            <div class="phase-step-label" id="phase3-label">Phase III</div>
+            <button class="btn btn-outline-secondary btn-sm w-100" disabled>
+                <i class="bi bi-pin-angle-fill me-1"></i>Safe Zone (auto)
+            </button>
+        </div>
+
+        <div class="phase-connector" id="conn-3-4"></div>
+
+        <!-- Phase IV -->
+        <div class="phase-step">
+            <div class="phase-step-label" id="phase4-label">Phase IV</div>
+            <button class="btn btn-outline-success btn-sm w-100" id="btn-generate" disabled>
+                <i class="bi bi-gear-wide-connected me-1"></i>Generate Cycle
+            </button>
+        </div>
+
+    </div>
+
+    <div id="phase-error-box" class="alert alert-danger py-2 small mt-2 mb-0" style="display:none"></div>
+</div>
+
+<!-- ── Row 3: G-code preview + execute ───────────────────── -->
+<div class="row g-3">
+
+    <div class="col-lg-8">
+        <div class="cnc-card">
+            <div class="cnc-card-title"><i class="bi bi-code-slash"></i> Generated G-code</div>
+            <textarea id="gcode-preview" class="form-control font-monospace"
+                      rows="18" readonly
+                      placeholder="G-code will appear here after Phase IV — Generate Cycle"></textarea>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="cnc-card">
+            <div class="cnc-card-title"><i class="bi bi-play-circle"></i> Execute</div>
+
+            <div id="execute-placeholder" class="text-muted small mb-3">
+                Generate a cycle first (Phase IV).
+            </div>
+
+            <div id="execute-controls" style="display:none">
+                <div class="d-grid gap-2 mb-3">
+                    <button class="btn btn-outline-secondary btn-sm" id="btn-validate">
+                        <i class="bi bi-shield-check me-1"></i>Validate G-code
+                    </button>
+                    <button class="btn btn-success" id="btn-execute">
+                        <i class="bi bi-play-fill me-1"></i>Execute Cutting Cycle
+                    </button>
+                </div>
+                <div id="validation-box" class="validation-box"></div>
+            </div>
+
+            <!-- Job progress -->
+            <div id="progress-section" style="display:none" class="mt-2">
+                <div class="d-flex justify-content-between small text-muted mb-1">
+                    <span>Progress</span>
+                    <span id="progress-text">0 / 0</span>
+                </div>
+                <div class="progress" style="height: 6px;">
+                    <div class="progress-bar bg-success" id="progress-bar"
+                         style="width: 0%" role="progressbar"></div>
+                </div>
+            </div>
+
+            <!-- Pass type legend -->
+            <div class="mt-4">
+                <div class="cnc-card-title mb-2">Pass Types (§4.3)</div>
+                <div class="small text-muted lh-lg">
+                    <div><span class="badge bg-secondary me-1">Roughing</span> 200 mm/min · 0.8 mm DOC</div>
+                    <div><span class="badge bg-primary me-1">Finishing</span> 75 mm/min · 0.15 mm DOC</div>
+                    <div><span class="badge bg-info text-dark me-1">Spring</span> 50 mm/min · 0 mm advance</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div><!-- /row 3 -->
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+'use strict';
+
+/* ── State ────────────────────────────────────────────── */
+let currentJobId = null;
+let phaseComplete = { home: false, sync: false };
+let prevStatus = null;
+
+/* ── Element refs ─────────────────────────────────────── */
+const btnHome     = document.getElementById('btn-home');
+const btnSync     = document.getElementById('btn-sync');
+const btnGenerate = document.getElementById('btn-generate');
+const btnValidate = document.getElementById('btn-validate');
+const btnExecute  = document.getElementById('btn-execute');
+const dryRunToggle = document.getElementById('dry-run-toggle');
+const banner       = document.getElementById('dry-run-banner');
+const gcodePreview = document.getElementById('gcode-preview');
+const validationBox = document.getElementById('validation-box');
+const executeControls = document.getElementById('execute-controls');
+const executePlaceholder = document.getElementById('execute-placeholder');
+const phaseErrorBox = document.getElementById('phase-error-box');
+const progressSection = document.getElementById('progress-section');
+
+/* ── Dry-run toggle ───────────────────────────────────── */
+function applyDryRun(enabled) {
+    banner.classList.toggle('active', enabled);
+    postJson('/serial/dry-run/', { enabled }).catch(() => {});
+}
+
+dryRunToggle.addEventListener('change', function () {
+    applyDryRun(this.checked);
+});
+
+// Initialise banner on page load
+applyDryRun(dryRunToggle.checked);
+
+/* ── Profile input dynamic limits & derived values ────── */
+function updateDerivedValues() {
+    const dStock    = parseFloat(document.getElementById('d-stock').value);
+    const lStickout = parseFloat(document.getElementById('l-stickout').value);
+    const dTargetEl = document.getElementById('d-target');
+    const lCutEl    = document.getElementById('l-cut');
+
+    if (!isNaN(dStock)) {
+        const maxTarget = (dStock - 0.5).toFixed(1);
+        dTargetEl.max = maxTarget;
+        document.getElementById('d-target-hint').textContent =
+            `Must be 0.5 – ${maxTarget} mm`;
+        const xApproach = (dStock / 2 + 6).toFixed(3);
+        document.getElementById('derived-x-approach').textContent = xApproach + ' mm';
+    }
+
+    if (!isNaN(lStickout)) {
+        const maxCut = (lStickout - 0.5).toFixed(1);
+        lCutEl.max = maxCut;
+        document.getElementById('l-cut-hint').textContent =
+            `Must be 0.5 – ${maxCut} mm`;
+        const yOffset = (-120 + lStickout).toFixed(3);
+        document.getElementById('derived-y-offset').textContent = yOffset + ' mm';
+    }
+}
+
+['d-stock', 'l-stickout', 'd-target', 'l-cut'].forEach(id => {
+    document.getElementById(id).addEventListener('input', updateDerivedValues);
+});
+
+/* ── Phase button state management ───────────────────── */
+function refreshPhaseButtons(status) {
+    const connected = (status !== 'disconnected');
+    const idle      = (status === 'connected');
+
+    btnHome.disabled = !connected || !idle;
+
+    const profileFilled = profileValid();
+    btnSync.disabled = !(phaseComplete.home && idle && profileFilled);
+
+    btnGenerate.disabled = !(phaseComplete.sync && idle && profileFilled);
+}
+
+function profileValid() {
+    const d = (id) => parseFloat(document.getElementById(id).value);
+    const dStock = d('d-stock'), lStickout = d('l-stickout'),
+          dTarget = d('d-target'), lCut = d('l-cut');
+    return (
+        dStock >= 1 && dStock <= 185 &&
+        lStickout >= 1 && lStickout <= 110 &&
+        dTarget >= 0.5 && dTarget <= dStock - 0.5 &&
+        lCut >= 0.5 && lCut <= lStickout - 0.5
+    );
+}
+
+['d-stock', 'l-stickout', 'd-target', 'l-cut'].forEach(id => {
+    document.getElementById(id).addEventListener('input', function () {
+        if (prevStatus) refreshPhaseButtons(prevStatus);
+    });
+});
+
+/* ── 200 ms position poll ─────────────────────────────── */
+function fmt(val) { return (typeof val === 'number') ? val.toFixed(3) : '—'; }
+
+function updatePositionPanel(data) {
+    // GRBL state badge
+    const badge = document.getElementById('grbl-state-badge');
+    const state = (data.grbl_state || 'Unknown').toLowerCase();
+    badge.textContent = data.grbl_state || '—';
+    badge.className = 'ms-auto grbl-state-badge ' + state;
+
+    // MPos
+    const mpos = data.mpos || {};
+    document.getElementById('mpos-x').textContent = fmt(mpos.X) + ' mm';
+    document.getElementById('mpos-y').textContent = fmt(mpos.Y) + ' mm';
+
+    // WPos with zeroed highlight
+    const wpos = data.wpos || {};
+    const wxEl = document.getElementById('wpos-x');
+    const wyEl = document.getElementById('wpos-y');
+    wxEl.textContent = fmt(wpos.X) + ' mm';
+    wyEl.textContent = fmt(wpos.Y) + ' mm';
+    const zeroed = (Math.abs(wpos.X || 0) < 0.001 && Math.abs(wpos.Y || 0) < 0.001
+                    && data.status !== 'disconnected');
+    wxEl.classList.toggle('zeroed', zeroed);
+    wyEl.classList.toggle('zeroed', zeroed);
+
+    // Feed / speed
+    document.getElementById('grbl-feed').textContent =
+        (data.feed !== undefined ? data.feed.toFixed(0) : '—') + ' mm/min';
+    document.getElementById('grbl-speed').textContent =
+        (data.speed !== undefined ? data.speed : '—') + ' RPM';
+
+    // Dry-run sync (authoritative value comes from server)
+    if (data.dry_run !== undefined && data.dry_run !== dryRunToggle.checked) {
+        dryRunToggle.checked = data.dry_run;
+        applyDryRun(data.dry_run);
+    }
+}
+
+function pollStatus() {
+    fetch('/machine/status/')
+        .then(r => r.json())
+        .then(data => {
+            // Navbar dot update (duplicate of global but ensures 200 ms refresh on this page)
+            const dot   = document.getElementById('status-dot');
+            const label = document.getElementById('status-label');
+            if (dot)   dot.className   = 'status-dot ' + data.status;
+            if (label) label.textContent =
+                data.status.charAt(0).toUpperCase() + data.status.slice(1);
+
+            // Cycle status indicator
+            document.getElementById('cycle-status-dot').className =
+                'status-dot ' + data.status;
+            document.getElementById('cycle-status-text').textContent =
+                data.status.charAt(0).toUpperCase() + data.status.slice(1);
+
+            updatePositionPanel(data);
+
+            // Detect phase completions by watching status transitions
+            if (prevStatus === 'homing' && data.status === 'connected') {
+                phaseComplete.home = true;
+                phaseComplete.sync = false;
+                markPhase(1, true);
+                showPhaseHint('Phase I complete — enter profile parameters, then Sync Workpiece.');
+                showToast('Homing cycle complete', 'success');
+            }
+            if (prevStatus === 'syncing' && data.status === 'connected') {
+                phaseComplete.sync = true;
+                markPhase(2, true);
+                markPhase(3, true);   // Phase III auto-fires as part of sync
+                showPhaseHint('Phase II+III complete — Generate the cutting cycle.');
+                showToast('Workpiece synchronised — tool at safe staging position', 'success');
+            }
+            if ((prevStatus === 'homing' || prevStatus === 'syncing') &&
+                data.status === 'error') {
+                showPhaseError(data.error_message || 'Operation failed');
+            }
+
+            prevStatus = data.status;
+            refreshPhaseButtons(data.status);
+
+            // Job progress bar
+            if (data.status === 'running' && data.total_lines > 0) {
+                progressSection.style.display = 'block';
+                const pct = Math.round((data.current_line / data.total_lines) * 100);
+                document.getElementById('progress-bar').style.width = pct + '%';
+                document.getElementById('progress-text').textContent =
+                    data.current_line + ' / ' + data.total_lines;
+            } else if (data.status === 'connected' || data.status === 'disconnected') {
+                progressSection.style.display = 'none';
+            }
+        })
+        .catch(() => {});
+}
+
+setInterval(pollStatus, 200);
+pollStatus();
+
+/* ── Phase helpers ────────────────────────────────────── */
+function markPhase(n, done) {
+    const label = document.getElementById('phase' + n + '-label');
+    if (label) label.classList.toggle('done', done);
+    const conn = document.getElementById('conn-' + n + '-' + (n + 1));
+    if (conn) conn.classList.toggle('done', done);
+}
+
+function showPhaseHint(msg) {
+    document.getElementById('phase-hint').textContent = msg;
+}
+
+function showPhaseError(msg) {
+    phaseErrorBox.textContent = msg;
+    phaseErrorBox.style.display = 'block';
+    setTimeout(() => { phaseErrorBox.style.display = 'none'; }, 6000);
+}
+
+/* ── Phase I — Home ───────────────────────────────────── */
+btnHome.addEventListener('click', function () {
+    phaseErrorBox.style.display = 'none';
+    btnHome.disabled = true;
+    postJson('/serial/home/', {})
+        .then(data => {
+            if (data.success) {
+                showPhaseHint('Homing in progress…');
+            } else {
+                showPhaseError(data.message);
+                btnHome.disabled = false;
+            }
+        })
+        .catch(err => { showPhaseError('Request failed: ' + err); btnHome.disabled = false; });
+});
+
+/* ── Phase II — Sync ──────────────────────────────────── */
+btnSync.addEventListener('click', function () {
+    phaseErrorBox.style.display = 'none';
+    const lStickout = parseFloat(document.getElementById('l-stickout').value);
+    if (isNaN(lStickout)) { showPhaseError('Enter L_stickout first.'); return; }
+    btnSync.disabled = true;
+    postJson('/serial/sync/', { l_stickout: lStickout })
+        .then(data => {
+            if (data.success) {
+                showPhaseHint('Syncing workpiece parameters…');
+            } else {
+                showPhaseError(data.message);
+            }
+        })
+        .catch(err => { showPhaseError('Request failed: ' + err); });
+});
+
+/* ── Phase IV — Generate cutting cycle ───────────────── */
+btnGenerate.addEventListener('click', function () {
+    if (!profileValid()) { showPhaseError('All four profile inputs are required and must be valid.'); return; }
+    phaseErrorBox.style.display = 'none';
+    btnGenerate.disabled = true;
+    btnGenerate.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Generating…';
+
+    const body = {
+        d_stock:    parseFloat(document.getElementById('d-stock').value),
+        l_stickout: parseFloat(document.getElementById('l-stickout').value),
+        d_target:   parseFloat(document.getElementById('d-target').value),
+        l_cut:      parseFloat(document.getElementById('l-cut').value),
+    };
+
+    postJson('/jobs/generate-profile/', body)
+        .then(data => {
+            btnGenerate.innerHTML = '<i class="bi bi-gear-wide-connected me-1"></i>Generate Cycle';
+            btnGenerate.disabled = false;
+            if (data.success) {
+                gcodePreview.value = data.gcode;
+                currentJobId = data.job_id;
+                validationBox.style.display = 'none';
+                validationBox.className = 'validation-box';
+                executePlaceholder.style.display = 'none';
+                executeControls.style.display = 'block';
+                markPhase(4, true);
+                showPhaseHint('G-code ready — validate and execute when ready.');
+                showToast('Cutting cycle generated', 'success');
+            } else {
+                showPhaseError(data.message);
+            }
+        })
+        .catch(err => {
+            btnGenerate.innerHTML = '<i class="bi bi-gear-wide-connected me-1"></i>Generate Cycle';
+            btnGenerate.disabled = false;
+            showPhaseError('Generation failed: ' + err);
+        });
+});
+
+/* ── Validate ─────────────────────────────────────────── */
+btnValidate && btnValidate.addEventListener('click', function () {
+    const gcode = gcodePreview.value.trim();
+    if (!gcode) return;
+    postJson('/jobs/validate/', { gcode })
+        .then(data => {
+            validationBox.style.display = 'block';
+            if (data.valid) {
+                validationBox.className = 'validation-box valid';
+                validationBox.textContent =
+                    `✓ Valid — ${data.line_count} executable lines`;
+            } else {
+                validationBox.className = 'validation-box invalid';
+                validationBox.textContent = data.errors.join(' | ');
+            }
+        })
+        .catch(() => {});
+});
+
+/* ── Execute ──────────────────────────────────────────── */
+btnExecute && btnExecute.addEventListener('click', function () {
+    const gcode = gcodePreview.value.trim();
+    if (!gcode) return;
+    if (!confirm(
+        dryRunToggle.checked
+            ? 'Execute cutting cycle in DRY RUN mode?\n\n(Spindle will not engage)'
+            : 'Execute cutting cycle with SPINDLE ACTIVE?\n\nEnsure the workpiece is secured and the area is clear.'
+    )) return;
+
+    btnExecute.disabled = true;
+    postJson('/jobs/execute/', {
+        gcode,
+        job_id: currentJobId,
+        command: 'Profile cutting cycle',
+    })
+        .then(data => {
+            if (data.success) {
+                showToast('Cutting cycle started', 'success');
+                progressSection.style.display = 'block';
+            } else {
+                showToast(data.message || 'Execute failed', 'danger');
+                btnExecute.disabled = false;
+            }
+        })
+        .catch(err => {
+            showToast('Execute request failed: ' + err, 'danger');
+            btnExecute.disabled = false;
+        });
+});
+
+// Re-enable execute button when job finishes
+document.addEventListener('machine-status', function (e) {
+    const s = e.detail.status;
+    if (btnExecute && (s === 'connected' || s === 'error')) {
+        btnExecute.disabled = false;
+    }
+});
+
+})();
+</script>
+{% endblock %}

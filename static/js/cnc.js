@@ -57,7 +57,7 @@ function updateMachineStatus() {
             if (label) label.textContent =
                 data.status.charAt(0).toUpperCase() + data.status.slice(1);
 
-            /* Broadcast for pages that listen */
+            /* Broadcast for pages that listen (includes grbl_state, mpos, wpos, etc.) */
             document.dispatchEvent(
                 new CustomEvent('machine-status', { detail: data })
             );
@@ -74,11 +74,6 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!btn) return;
 
     btn.addEventListener('click', function () {
-        if (!confirm(
-            'ACTIVATE EMERGENCY STOP?\n\n' +
-            'This will immediately halt all machine motion and cannot be undone.'
-        )) return;
-
         btn.disabled = true;
         postJson('/serial/emergency-stop/', {})
             .then(function (data) {

@@ -3,6 +3,151 @@ import re
 from openai import OpenAI
 
 
+def _build_profile_prompt(
+    d_stock: float,
+    l_stickout: float,
+    d_target: float,
+    l_cut: float,
+    x_limit: float,
+) -> str:
+    r_stock  = d_stock  / 2.0
+    r_target = d_target / 2.0
+    x_approach = r_stock + 6.0
+
+    return (
+        f"You are a G-code programmer for a hobbyist GRBL-based CNC lathe.\n\n"
+        f"MACHINE HARDWARE:\n"
+        f"- 2-axis (X and Y only) — X is radial (cross-slide), Y is longitudinal (carriage)\n"
+        f"- NEMA 17 stepper motors, GRBL firmware on Arduino\n"
+        f"- DC spindle with PWM speed control, operational range S500–S1000 (below S500 the motor stalls)\n"
+        f"- No coolant, no tool changer\n"
+        f"- X-axis limit: {x_limit:.1f} mm (radius)\n\n"
+        f"CRITICAL — DIAMETER vs RADIUS:\n"
+        f"- All operator measurements below are DIAMETERS.\n"
+        f"- All X coordinates you emit must be RADII (divide diameter by 2).\n"
+        f"- Emitting a diameter as an X coordinate doubles the cut depth and crashes the machine.\n\n"
+        f"WORKPIECE MEASUREMENTS (operator-supplied):\n"
+        f"- Stock diameter   : {d_stock:.3f} mm  →  stock radius   = {r_stock:.3f} mm\n"
+        f"- Target diameter  : {d_target:.3f} mm  →  target radius  = {r_target:.3f} mm\n"
+        f"- Stickout length  : {l_stickout:.3f} mm  (total bar overhang from chuck face)\n"
+        f"- Turning length   : {l_cut:.3f} mm  (length of section to be turned)\n\n"
+        f"DERIVED VALUES (already computed — use these exactly):\n"
+        f"- Approach clearance X : {x_approach:.3f} mm  (6 mm beyond stock radius; rapid to here first)\n"
+        f"- G54 work coordinate system is already active — Y=0 is the front face of the stock.\n"
+        f"- Cutting depth end    : Y={-l_cut:.3f} mm  (move in the NEGATIVE Y direction to cut along the stock)\n\n"
+        f"CRITICAL — PER-PASS MOTION PATTERN (follow this exactly for every pass):\n"
+        f"  Step 1: G00 X<radius>          ; rapid to this pass's cutting X radius (never use G01 to approach in X)\n"
+        f"  Step 2: G00 Y0.500             ; rapid to 0.5 mm in front of the stock face — DO NOT use G01 here\n"
+        f"  Step 3: G01 Y{-l_cut:.3f} F<feed> ; feed cut along the full length\n"
+        f"  Step 4: G00 X{x_approach:.3f}  ; rapid retract in X to clearance\n"
+        f"  Step 5: G00 Y5.000             ; rapid back to safe Y\n"
+        f"NEVER use G01 to travel from Y=5 to Y=0 — that creates an unintended facing cut on the stock end.\n\n"
+        f"MATERIAL: Engineering wax (Ferris File-A-Wax or equivalent, Shore D 55-70).\n\n"
+        f"REQUIRED PASS STRATEGY (generate all three stages):\n"
+        f"1. ROUGHING PASSES — feedrate 150-250 mm/min, 0.5-1.0 mm radial depth per pass.\n"
+        f"   Leave ~0.3 mm radial stock for finishing.\n"
+        f"   Spindle: choose S500–S700 (slower = more torque for bulk removal in wax).\n"
+        f"2. FINISHING PASSES — feedrate 50-100 mm/min, 0.1-0.2 mm radial depth.\n"
+        f"   Make at least two finishing passes down to the target radius.\n"
+        f"   Spindle: choose S700–S900 (higher speed for a cleaner surface finish).\n"
+        f"3. SPRING CUT — feedrate 50 mm/min, zero radial advance.\n"
+        f"   Repeat the finishing pass at the same X without moving in X first.\n"
+        f"   Spindle: choose S900–S1000 (maximum speed for a polished final pass).\n"
+        f"   This removes the micro-ridge that wax leaves due to spring-back under cutting force.\n\n"
+        f"ALLOWED G-CODES (use only these):\n"
+        f"  G00, G01, G02, G03 — motion\n"
+        f"  G04                — dwell\n"
+        f"  G20, G21           — units (use G21 mm)\n"
+        f"  G28                — home\n"
+        f"  G90, G91           — positioning (use G90 absolute)\n"
+        f"  G92                — coordinate offset\n\n"
+        f"ALLOWED M-CODES (use only these):\n"
+        f"  M03 S<value>       — spindle on (always include S word, range S500–S1000)\n"
+        f"  M05                — spindle off\n"
+        f"  M30                — program end\n\n"
+        f"FORBIDDEN (never include):\n"
+        f"  G40/G41/G42  G94/G95/G96/G97  G17/G18/G19\n"
+        f"  M06/M07/M08/M09  T words  Z words (this machine has no Z axis)\n\n"
+        f"OUTPUT RULES:\n"
+        f"- Start program with: G21 G90\n"
+        f"- Turn spindle on immediately after using the speed appropriate for the first pass (M03 S<value>, S500–S1000).\n"
+        f"- Change spindle speed with a new M03 S<value> line before each new pass stage.\n"
+        f"- Rapid to safe approach position first: G00 X{x_approach:.3f} Y5.000\n"
+        f"- Every pass must approach Y=0.500 with G00 (rapid), never with G01.\n"
+        f"- Use Y (not Z) for the longitudinal axis throughout.\n"
+        f"- End with M05 then M30.\n"
+        f"- Feed rates must be 10-500 mm/min.\n"
+        f"- Add a brief G-code comment (semicolon) before each stage.\n"
+        f"- Output raw G-code ONLY — no markdown, no code fences, no explanations."
+    )
+
+
+def generate_gcode_from_profile(
+    d_stock: float,
+    l_stickout: float,
+    d_target: float,
+    l_cut: float,
+    api_key: str,
+    model: str = 'gpt-4o',
+    x_limit: float = 100.0,
+) -> str:
+    """Call the OpenAI API to generate a multi-pass turning program from profile parameters."""
+    if not api_key:
+        raise ValueError(
+            'OpenAI API key is not configured. Please set it in the Settings page.'
+        )
+
+    client = OpenAI(api_key=api_key)
+    prompt = _build_profile_prompt(d_stock, l_stickout, d_target, l_cut, x_limit)
+
+    response = client.responses.create(
+        model=model,
+        instructions=(
+            'You are a CNC lathe G-code generator. '
+            'Output only raw G-code — no markdown, no explanations.'
+        ),
+        input=prompt,
+    )
+
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.warning('GPT profile response: %s', repr(response))
+
+    gcode = response.output_text.strip()
+
+    if not gcode:
+        try:
+            for item in response.output:
+                if getattr(item, 'type', None) == 'message':
+                    for part in item.content:
+                        text = getattr(part, 'text', None)
+                        if text:
+                            gcode = text.strip()
+                            break
+                if gcode:
+                    break
+        except Exception:
+            pass
+
+    if not gcode:
+        raise ValueError('GPT returned an empty response.')
+
+    # Strip accidental markdown fences
+    if gcode.startswith('```'):
+        lines = gcode.splitlines()
+        start = 1
+        end = len(lines) - 1 if lines[-1].strip() == '```' else len(lines)
+        gcode = '\n'.join(lines[start:end]).strip()
+
+    # Clamp spindle speed to S500–S1000 (motor stalls below 500)
+    def _clamp_speed(m):
+        val = min(max(int(float(m.group(1))), 500), 1000)
+        return f'S{val}'
+    gcode = re.sub(r'\bS(\d+(?:\.\d+)?)\b', _clamp_speed, gcode, flags=re.IGNORECASE)
+
+    return gcode
+
+
 def _build_prompt(command: str, x_limit: float, y_limit: float) -> str:
     return (
         f"You are a G-code generator for a hobbyist GRBL-based CNC lathe.\n\n"

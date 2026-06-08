@@ -3,8 +3,11 @@ import re
 # G-codes supported by GRBL on this hobbyist 2-axis lathe
 _VALID_G_CODES = {
     'G00', 'G01', 'G02', 'G03', 'G04',
+    'G10',                          # Coordinate system set (Phase II sync)
     'G20', 'G21',
     'G28',
+    'G49',                          # Cancel tool length offset (init)
+    'G54',                          # Activate WCS 1 (Phase II sync)
     'G90', 'G91', 'G92',
 }
 

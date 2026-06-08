@@ -55,6 +55,20 @@ class SerialController:
         self._stop_event = threading.Event()
         self._job_thread: threading.Thread | None = None
 
+        # GRBL live state (updated by background poll and status reports)
+        self._grbl_state = 'Unknown'
+        self._mpos = {'X': 0.0, 'Y': 0.0}
+        self._wpos = {'X': 0.0, 'Y': 0.0}
+        self._feed = 0.0
+        self._speed = 0
+        self._dry_run = True   # Always ON after connection/homing
+        self._poll_stop = threading.Event()
+        self._poll_thread: threading.Thread | None = None
+
+        # Phase completion flags (persistent across page refreshes)
+        self._homed = False
+        self._synced = False
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -78,8 +92,26 @@ class SerialController:
                 self._serial = serial.Serial(port, baud_rate, timeout=5)
                 time.sleep(2)          # Wait for Arduino bootloader
                 self._serial.reset_input_buffer()
+                # Send session-start coordinate resets (best-effort)
+                try:
+                    for cmd in (b'G92.1\n', b'G49\n'):
+                        self._serial.write(cmd)
+                        self._serial.flush()
+                        time.sleep(0.05)
+                    self._serial.reset_input_buffer()
+                except Exception:
+                    pass
                 self._status = 'connected'
+                self._dry_run = True
                 self._error_message = ''
+                self._homed = False
+                self._synced = False
+                # Start background GRBL status polling
+                self._poll_stop.clear()
+                self._poll_thread = threading.Thread(
+                    target=self._poll_loop, daemon=True
+                )
+                self._poll_thread.start()
                 return True, f'Connected to {port} at {baud_rate} baud'
             except Exception as exc:
                 self._serial = None
@@ -88,11 +120,20 @@ class SerialController:
                 return False, str(exc)
 
     def disconnect(self) -> tuple[bool, str]:
+        self._poll_stop.set()
+        if self._poll_thread and self._poll_thread.is_alive():
+            self._poll_thread.join(timeout=1.0)
+        self._poll_thread = None
         with self._serial_lock:
             if self._serial and self._serial.is_open:
                 self._serial.close()
             self._serial = None
         self._status = 'disconnected'
+        self._homed = False
+        self._synced = False
+        self._grbl_state = 'Unknown'
+        self._mpos = {'X': 0.0, 'Y': 0.0}
+        self._wpos = {'X': 0.0, 'Y': 0.0}
         self._error_message = ''
         return True, 'Disconnected'
 
@@ -109,6 +150,33 @@ class SerialController:
         self._status = 'error'
         self._error_message = 'Emergency stop activated'
         return True
+
+    def cancel_job(self) -> tuple[bool, str]:
+        """Cancel the currently running job and reset controller state to connected."""
+        if self._status not in ('running', 'error'):
+            return False, 'No active job to cancel'
+        self._stop_event.set()
+        # Give the execute thread up to 1 s to notice
+        if self._job_thread and self._job_thread.is_alive():
+            self._job_thread.join(timeout=1.0)
+        # Force-mark DB record if thread didn't get there
+        if self._current_job_id:
+            try:
+                from jobs.models import Job
+                job = Job.objects.get(id=self._current_job_id)
+                if job.execution_status in ('running', 'pending'):
+                    job.execution_status = 'stopped'
+                    job.error_message = 'Cancelled by operator'
+                    job.save()
+            except Exception:
+                pass
+        self._status = 'connected'
+        self._error_message = ''
+        self._current_job_id = None
+        self._current_line = 0
+        self._total_lines = 0
+        self._stop_event.clear()
+        return True, 'Job cancelled'
 
     def send_gcode(self, gcode_lines: list[str], job_id: int | None = None) -> tuple[bool, str]:
         if self._status == 'disconnected':
@@ -139,6 +207,14 @@ class SerialController:
             'position': dict(self._position),
             'error_message': self._error_message,
             'current_job_id': self._current_job_id,
+            'grbl_state': self._grbl_state,
+            'mpos': dict(self._mpos),
+            'wpos': dict(self._wpos),
+            'feed': self._feed,
+            'speed': self._speed,
+            'dry_run': self._dry_run,
+            'homed': self._homed,
+            'synced': self._synced,
         }
 
     def is_connected(self) -> bool:
@@ -169,6 +245,13 @@ class SerialController:
             if not line or line.startswith(';'):
                 continue
 
+            # Dry-run mode: suppress spindle-on commands
+            first_word = line.split()[0].upper() if line.split() else ''
+            if self._dry_run and first_word in ('M3', 'M03', 'M4', 'M04'):
+                executable_index += 1
+                self._current_line = executable_index
+                continue
+
             # --- Send line ---
             with self._serial_lock:
                 if not (self._serial and self._serial.is_open):
@@ -186,10 +269,11 @@ class SerialController:
                     return
 
             # --- Wait for 'ok' acknowledgement ---
-            # Synchronized M-codes (M05, M30) wait for all buffered motion to
-            # complete before GRBL responds, so they need a much longer timeout.
+            # M03/M04 (spindle on/speed change) are synchronising: GRBL drains the
+            # motion buffer before changing speed and sending ok, so they need the
+            # same generous timeout as M05/M30.
             upper = line.upper()
-            is_sync = any(code in upper for code in ('M05', 'M30', 'M00', 'M01', 'M02'))
+            is_sync = any(code in upper for code in ('M03', 'M3', 'M04', 'M4', 'M05', 'M30', 'M00', 'M01', 'M02'))
             timeout_s = 300 if is_sync else 30
             deadline = time.monotonic() + timeout_s
             while True:
@@ -213,6 +297,18 @@ class SerialController:
                         if response.startswith('error'):
                             self._status = 'error'
                             self._error_message = f'GRBL error on line "{line}": {response}'
+                            self._update_job_status('failed')
+                            return
+                        # GRBL reset banner — controller was physically reset
+                        if response.lower().startswith('grbl'):
+                            self._status = 'error'
+                            self._error_message = 'GRBL controller was reset mid-job'
+                            self._update_job_status('stopped')
+                            return
+                        # ALARM state — e.g. limit switch triggered
+                        if response.startswith('ALARM'):
+                            self._status = 'error'
+                            self._error_message = f'GRBL ALARM: {response}'
                             self._update_job_status('failed')
                             return
                         if response.startswith('<'):
@@ -250,16 +346,201 @@ class SerialController:
             pass
 
     def _parse_status_report(self, report: str) -> None:
-        """Parse a GRBL status report like <Idle|MPos:1.000,2.000,3.000|...>."""
+        """Parse a GRBL status report: <State|MPos:x,y,z|WPos:x,y,z|FS:f,s>"""
         try:
-            if 'MPos:' in report:
-                mpos = report.split('MPos:')[1].split('|')[0]
-                coords = mpos.split(',')
-                self._position['X'] = float(coords[0])
-                # On a lathe the Z axis is coords[2] (GRBL uses X,Y,Z order)
-                self._position['Z'] = float(coords[2]) if len(coords) > 2 else 0.0
+            inner = report.strip('<>').split('|')
+            if inner:
+                self._grbl_state = inner[0]
+            for part in inner[1:]:
+                if part.startswith('MPos:'):
+                    coords = part[5:].split(',')
+                    x = float(coords[0]) if len(coords) > 0 else 0.0
+                    y = float(coords[1]) if len(coords) > 1 else 0.0
+                    self._mpos = {'X': x, 'Y': y}
+                    # Legacy position field for backward compatibility
+                    self._position['X'] = x
+                    self._position['Z'] = y
+                elif part.startswith('WPos:'):
+                    coords = part[5:].split(',')
+                    self._wpos = {
+                        'X': float(coords[0]) if len(coords) > 0 else 0.0,
+                        'Y': float(coords[1]) if len(coords) > 1 else 0.0,
+                    }
+                elif part.startswith('FS:'):
+                    fs = part[3:].split(',')
+                    self._feed = float(fs[0]) if len(fs) > 0 else 0.0
+                    self._speed = int(float(fs[1])) if len(fs) > 1 else 0
         except Exception:
             pass
+
+    # ------------------------------------------------------------------
+    # Phase control methods (spec §4.2)
+    # ------------------------------------------------------------------
+
+    def home(self) -> tuple[bool, str]:
+        """Phase I: start GRBL homing cycle ($H) in a background thread."""
+        if self._status == 'disconnected':
+            return False, 'Machine is not connected'
+        if self._job_thread and self._job_thread.is_alive():
+            return False, 'Another operation is in progress'
+        self._stop_event.clear()
+        self._status = 'homing'
+        self._error_message = ''
+        self._job_thread = threading.Thread(target=self._run_home, daemon=True)
+        self._job_thread.start()
+        return True, 'Homing cycle started'
+
+    def _run_home(self) -> None:
+        """Background thread: send $H and wait for GRBL to report ok."""
+        from machine.models import MachineLog
+        with self._serial_lock:
+            if not (self._serial and self._serial.is_open):
+                self._status = 'error'
+                self._error_message = 'Serial connection lost'
+                return
+            try:
+                self._serial.write(b'$H\n')
+                self._serial.flush()
+            except Exception as exc:
+                self._status = 'error'
+                self._error_message = str(exc)
+                return
+        deadline = time.monotonic() + 120   # 2-minute homing timeout
+        while time.monotonic() < deadline:
+            if self._stop_event.is_set():
+                self._status = 'error'
+                self._error_message = 'Homing stopped by user'
+                return
+            with self._serial_lock:
+                if self._serial and self._serial.in_waiting:
+                    response = self._serial.readline().decode('utf-8', errors='replace').strip()
+                    if response == 'ok':
+                        self._status = 'connected'
+                        self._homed = True
+                        self._dry_run = True   # Always reset dry-run after homing
+                        self._grbl_state = 'Idle'
+                        try:
+                            MachineLog.objects.create(
+                                event_type='connection',
+                                message='Homing cycle completed — axes at reference position',
+                            )
+                        except Exception:
+                            pass
+                        return
+                    if response.startswith('ALARM') or response.startswith('error'):
+                        self._status = 'error'
+                        self._error_message = f'Homing failed: {response}'
+                        return
+                    if response.startswith('<'):
+                        self._parse_status_report(response)
+            time.sleep(0.05)
+        self._status = 'error'
+        self._error_message = 'Homing cycle timed out'
+
+    def sync_workpiece(self, l_stickout: float) -> tuple[bool, str]:
+        """Phase II+III: set G54 work offset and move to safe staging position."""
+        if self._status == 'disconnected':
+            return False, 'Machine is not connected'
+        if self._job_thread and self._job_thread.is_alive():
+            return False, 'Another operation is in progress'
+        work_y_offset = -120.0 + l_stickout
+        lines = [
+            f'G10 L2 P1 X-69.000 Y{work_y_offset:.3f}',
+            'G54',
+            'G00 X15.000 Y5.000',   # Phase III: safe staging position
+        ]
+        self._stop_event.clear()
+        self._status = 'syncing'
+        self._error_message = ''
+        self._job_thread = threading.Thread(
+            target=self._run_command_sequence,
+            args=(lines, 'Workpiece synchronised — tool at safe staging position'),
+            kwargs={'flag_synced': True},
+            daemon=True,
+        )
+        self._job_thread.start()
+        return True, 'Workpiece synchronisation started'
+
+    def _run_command_sequence(self, lines: list[str], success_msg: str, flag_synced: bool = False) -> None:
+        """Background thread: send G-code lines and wait for each ok."""
+        from machine.models import MachineLog
+        for raw_line in lines:
+            line = raw_line.strip()
+            if not line:
+                continue
+            with self._serial_lock:
+                if not (self._serial and self._serial.is_open):
+                    self._status = 'error'
+                    self._error_message = 'Serial connection lost'
+                    return
+                try:
+                    self._serial.write((line + '\n').encode())
+                    self._serial.flush()
+                except Exception as exc:
+                    self._status = 'error'
+                    self._error_message = str(exc)
+                    return
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                if self._stop_event.is_set():
+                    self._status = 'error'
+                    self._error_message = 'Operation stopped'
+                    return
+                with self._serial_lock:
+                    if self._serial and self._serial.in_waiting:
+                        response = self._serial.readline().decode('utf-8', errors='replace').strip()
+                        if response == 'ok':
+                            break
+                        if response.startswith('error'):
+                            self._status = 'error'
+                            self._error_message = f'GRBL error on "{line}": {response}'
+                            return
+                        if response.startswith('<'):
+                            self._parse_status_report(response)
+                time.sleep(0.01)
+            else:
+                self._status = 'error'
+                self._error_message = f'Timeout waiting for response on: {line}'
+                return
+        self._status = 'connected'
+        if flag_synced:
+            self._synced = True
+        try:
+            MachineLog.objects.create(event_type='connection', message=success_msg)
+        except Exception:
+            pass
+
+    def set_dry_run(self, enabled: bool) -> None:
+        """Enable or disable dry-run mode (spindle suppression)."""
+        self._dry_run = enabled
+
+    def _poll_loop(self) -> None:
+        """Background thread: query GRBL '?' every 200 ms when idle."""
+        while not self._poll_stop.wait(0.2):
+            if self._status != 'connected':
+                continue
+            # Send real-time query
+            with self._serial_lock:
+                if not (self._serial and self._serial.is_open):
+                    continue
+                try:
+                    self._serial.write(b'?')
+                    self._serial.flush()
+                except Exception:
+                    continue
+            # Read response without holding the lock the whole time
+            deadline = time.monotonic() + 0.1
+            while time.monotonic() < deadline:
+                with self._serial_lock:
+                    if self._serial and self._serial.in_waiting:
+                        try:
+                            line = self._serial.readline().decode('utf-8', errors='replace').strip()
+                            if line.startswith('<'):
+                                self._parse_status_report(line)
+                                break
+                        except Exception:
+                            break
+                time.sleep(0.005)
 
 
 # Module-level singleton

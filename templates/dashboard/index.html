@@ -1,192 +1,259 @@
-{% extends 'base.html' %}
+﻿{% extends 'base.html' %}
 
-{% block title %}Dashboard — CNC Lathe{% endblock %}
+{% block title %}CNC Lathe Control{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h5 class="page-heading">Dashboard</h5>
+
+<!-- â”€â”€ Dry-run banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+<div id="dry-run-banner">
+    <i class="bi bi-exclamation-triangle-fill"></i>
+    DRY RUN ACTIVE â€” Spindle will NOT engage during this cycle
 </div>
 
-<!-- ── Row 1: Machine status | Connection | Execute ──────── -->
-<div class="row g-3 mb-3">
-
-    <!-- Machine status -->
-    <div class="col-md-4">
-        <div class="cnc-card h-100">
-            <div class="cnc-card-title"><i class="bi bi-hdd-network"></i> Machine Status</div>
-
-            <div class="d-flex align-items-center gap-2 mb-1">
-                <span class="status-dot disconnected" id="dash-dot"></span>
-                <span id="dash-status-text" class="fw-semibold">Disconnected</span>
-            </div>
-            <p class="text-muted small mb-3" id="dash-job-info">No active job</p>
-
-            <div class="axis-display">
-                <div class="axis-block">
-                    <div class="axis-label">X Axis</div>
-                    <div class="axis-value"><span id="dash-x">0.00</span></div>
-                </div>
-                <div class="axis-block">
-                    <div class="axis-label">Z Axis</div>
-                    <div class="axis-value"><span id="dash-z">0.00</span></div>
-                </div>
-            </div>
-
-        </div>
+<!-- â”€â”€ Page header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h5 class="page-heading mb-0">CNC Lathe Control</h5>
+        <small class="text-muted">Follow the steps below in order</small>
     </div>
-
-    <!-- Connection -->
-    <div class="col-md-4">
-        <div class="cnc-card h-100">
-            <div class="cnc-card-title"><i class="bi bi-plug"></i> Serial Connection</div>
-
-            <div class="mb-2">
-                <label class="form-label small fw-semibold mb-1">COM Port</label>
-                <div class="input-group input-group-sm">
-                    <select class="form-select" id="port-select">
-                        <option value="">Scanning ports…</option>
-                    </select>
-                    <button class="btn btn-outline-secondary" id="refresh-ports-btn" title="Refresh">
-                        <i class="bi bi-arrow-clockwise"></i>
-                    </button>
-                </div>
-            </div>
-
-            <div class="mb-3">
-                <label class="form-label small fw-semibold mb-1">Baud Rate</label>
-                <select class="form-select form-select-sm" id="baud-select">
-                    <option value="115200" selected>115200</option>
-                    <option value="57600">57600</option>
-                    <option value="38400">38400</option>
-                    <option value="19200">19200</option>
-                    <option value="9600">9600</option>
-                </select>
-            </div>
-
-            <div class="d-flex gap-2">
-                <button class="btn btn-success btn-sm flex-grow-1" id="connect-btn">
-                    <i class="bi bi-plug-fill"></i> Connect
-                </button>
-                <button class="btn btn-outline-secondary btn-sm flex-grow-1" id="disconnect-btn">
-                    <i class="bi bi-x-circle"></i> Disconnect
-                </button>
-            </div>
-        </div>
+    <div class="form-check form-switch mb-0">
+        <input class="form-check-input" type="checkbox" id="dry-run-toggle" checked>
+        <label class="form-check-label small fw-semibold" for="dry-run-toggle">
+            Dry Run <span class="text-muted fw-normal">(no spindle)</span>
+        </label>
     </div>
+</div>
 
-    <!-- Execute / job control -->
-    <div class="col-md-4">
-        <div class="cnc-card h-100">
-            <div class="cnc-card-title"><i class="bi bi-play-circle"></i> Execute</div>
-
-            <!-- Shown when G-code is ready -->
-            <div id="execute-card" style="display:none">
-                <div class="d-flex gap-2 mb-3">
-                    <button class="btn btn-outline-secondary btn-sm flex-grow-1" id="validate-btn">
-                        <i class="bi bi-shield-check me-1"></i>Validate
-                    </button>
-                    <button class="btn btn-success flex-grow-1" id="execute-btn">
-                        <i class="bi bi-play-fill me-1"></i>Execute
-                    </button>
-                </div>
-            </div>
-
-            <!-- Shown when no G-code yet -->
-            <div id="execute-placeholder">
-                <p class="text-muted small mb-2">Enter a command and generate G-code first.</p>
-            </div>
-
-            <!-- Validation result -->
-            <div id="validation-box" class="validation-box"></div>
-
-            <!-- Execution progress -->
-            <div id="job-progress" style="display:none">
-                <div class="d-flex justify-content-between mb-1">
-                    <small class="text-muted fw-semibold">Executing…</small>
-                    <small class="text-muted" id="progress-text">0 / 0 lines</small>
-                </div>
-                <div class="progress mb-1" style="height:10px">
-                    <div class="progress-bar progress-bar-striped progress-bar-animated bg-success"
-                         id="progress-bar" style="width:0%"></div>
-                </div>
-                <small class="text-muted" id="progress-status"></small>
-            </div>
-
-            <!-- Status polling progress (running jobs) -->
-            <div id="dash-progress-wrap" style="display:none;margin-top:8px">
-                <div class="d-flex justify-content-between mb-1">
-                    <small class="text-muted">Progress</small>
-                    <small class="text-muted" id="dash-progress-text">0 / 0 lines</small>
-                </div>
-                <div class="progress" style="height:8px">
-                    <div class="progress-bar progress-bar-striped progress-bar-animated bg-warning"
-                         id="dash-progress-bar" style="width:0%"></div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-</div><!-- /row 1 -->
-
-<!-- ── Row 2: Command input | G-code preview ────────────── -->
-<div class="row g-3 mb-3">
-
-    <!-- Command input -->
-    <div class="col-lg-5">
-        <div class="cnc-card">
-            <div class="cnc-card-title">
-                <i class="bi bi-chat-left-text"></i> Machining Command
-            </div>
-
-            <textarea class="form-control mb-2" id="command-input" rows="3"
-                placeholder="e.g. Turn diameter to 20mm for 50mm length"></textarea>
-
-            <div class="mb-3">
-                <div class="text-muted mb-1" style="font-size:0.75rem">Quick examples:</div>
-                <span class="example-chip" onclick="setExample(this)">Turn diameter to 20mm for 50mm length</span>
-                <span class="example-chip" onclick="setExample(this)">Face the workpiece</span>
-                <span class="example-chip" onclick="setExample(this)">Cut a groove 5mm deep at Z30</span>
-                <span class="example-chip" onclick="setExample(this)">Move to X10 Z20</span>
-                <span class="example-chip" onclick="setExample(this)">Turn 35mm diameter, 80mm long, feed 150</span>
-            </div>
-
-            <button class="btn btn-primary w-100" id="generate-btn">
-                <i class="bi bi-magic me-1"></i>Generate G-Code
-            </button>
-        </div>
-    </div>
-
-    <!-- G-code preview -->
-    <div class="col-lg-7">
-        <div class="cnc-card">
-            <div class="cnc-card-title d-flex justify-content-between align-items-center">
-                <span><i class="bi bi-code-square me-1"></i>G-code Preview</span>
-                <small class="text-muted" id="gcode-line-count"></small>
-            </div>
-            <textarea class="form-control" id="gcode-preview" rows="10"
-                placeholder="Generated G-code will appear here.&#10;&#10;You can edit it manually before executing."></textarea>
-            <div class="d-flex gap-2 mt-2">
-                <button class="btn btn-outline-secondary btn-sm" id="clear-gcode-btn">
-                    <i class="bi bi-trash me-1"></i>Clear
-                </button>
-                <button class="btn btn-outline-secondary btn-sm" id="copy-gcode-btn">
-                    <i class="bi bi-clipboard me-1"></i>Copy
-                </button>
-            </div>
-        </div>
-    </div>
-
-</div><!-- /row 2 -->
-
-<!-- ── Row 3: Recent jobs | Event log ───────────────────── -->
+<!-- â”€â”€ Two-column layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
 <div class="row g-3">
 
-    <!-- Recent jobs -->
-    <div class="col-lg-7">
+    <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• LEFT COLUMN â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+    <div class="col-lg-8">
+
+        <!-- â–¶ STEP 1: Connect â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+        <div class="workflow-step cnc-card mb-3" id="step1-card">
+            <div class="step-header">
+                <div class="step-badge" id="step1-badge">1</div>
+                <div class="flex-grow-1">
+                    <div class="step-title">Connect to Machine</div>
+                    <div class="step-desc">Select the COM port the Arduino is plugged into, then click Connect.</div>
+                </div>
+                <span class="step-check" id="step1-check"><i class="bi bi-check-circle-fill"></i></span>
+            </div>
+            <div class="step-body mt-3">
+                <div class="row g-2 align-items-end">
+                    <div class="col-sm-5">
+                        <label class="form-label small fw-semibold mb-1">COM Port</label>
+                        <div class="input-group input-group-sm">
+                            <select class="form-select" id="port-select">
+                                <option value="">Scanning ports&hellip;</option>
+                            </select>
+                            <button class="btn btn-outline-secondary" id="refresh-ports-btn" title="Refresh ports">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="col-sm-3">
+                        <label class="form-label small fw-semibold mb-1">Baud Rate</label>
+                        <select class="form-select form-select-sm" id="baud-select">
+                            <option value="115200" selected>115200</option>
+                            <option value="57600">57600</option>
+                            <option value="38400">38400</option>
+                            <option value="19200">19200</option>
+                            <option value="9600">9600</option>
+                        </select>
+                    </div>
+                    <div class="col-sm-4">
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-success btn-sm flex-grow-1" id="connect-btn">
+                                <i class="bi bi-plug-fill me-1"></i>Connect
+                            </button>
+                            <button class="btn btn-outline-secondary btn-sm flex-grow-1" id="disconnect-btn" disabled>
+                                <i class="bi bi-x-circle me-1"></i>Disconnect
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- â–¶ STEP 2: Home Machine â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+        <div class="workflow-step cnc-card mb-3" id="step2-card">
+            <div class="step-header">
+                <div class="step-badge locked" id="step2-badge">2</div>
+                <div class="flex-grow-1">
+                    <div class="step-title">Home the Machine</div>
+                    <div class="step-desc">Moves all axes to the reference switches so the controller knows exactly where the tool is. Do this once per session before cutting.</div>
+                </div>
+                <span class="step-check" id="step2-check"><i class="bi bi-check-circle-fill"></i></span>
+            </div>
+            <div class="step-body mt-3">
+                <button class="btn btn-primary btn-sm" id="btn-home" disabled>
+                    <i class="bi bi-house-door-fill me-1"></i>Initialize &amp; Home Machine
+                </button>
+                <span class="ms-2 small text-muted" id="home-hint">Connect first</span>
+            </div>
+            <div id="home-error" class="alert alert-danger py-2 small mt-2 mb-0" style="display:none"></div>
+        </div>
+
+        <!-- â–¶ STEP 3: Measure & Sync â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+        <div class="workflow-step cnc-card mb-3" id="step3-card">
+            <div class="step-header">
+                <div class="step-badge locked" id="step3-badge">3</div>
+                <div class="flex-grow-1">
+                    <div class="step-title">Measure &amp; Sync Workpiece</div>
+                    <div class="step-desc">Enter the physical dimensions of your stock, then click Sync. The machine will set its work origin at the front face of the bar and move the tool to a safe starting position.</div>
+                </div>
+                <span class="step-check" id="step3-check"><i class="bi bi-check-circle-fill"></i></span>
+            </div>
+            <div class="step-body mt-3">
+
+                <div class="profile-input-group mb-3">
+                    <div class="param-input-block">
+                        <label for="d-stock">Stock Diameter <span class="text-muted fw-normal">(current width of bar)</span></label>
+                        <div class="input-group input-group-sm">
+                            <input type="number" class="form-control" id="d-stock"
+                                   min="1" max="185" step="0.1" placeholder="e.g. 30">
+                            <span class="input-group-text">mm Ã˜</span>
+                        </div>
+                        <div class="derived-hint">1 â€“ 185 mm</div>
+                    </div>
+                    <div class="param-input-block">
+                        <label for="l-stickout">Stickout Length <span class="text-muted fw-normal">(how far bar overhangs chuck)</span></label>
+                        <div class="input-group input-group-sm">
+                            <input type="number" class="form-control" id="l-stickout"
+                                   min="1" max="110" step="0.1" placeholder="e.g. 60">
+                            <span class="input-group-text">mm</span>
+                        </div>
+                        <div class="derived-hint">1 â€“ 110 mm</div>
+                    </div>
+                    <div class="param-input-block">
+                        <label for="d-target">Target Diameter <span class="text-muted fw-normal">(finished width after turning)</span></label>
+                        <div class="input-group input-group-sm">
+                            <input type="number" class="form-control" id="d-target"
+                                   min="0.5" step="0.1" placeholder="e.g. 20">
+                            <span class="input-group-text">mm Ã˜</span>
+                        </div>
+                        <div class="derived-hint" id="d-target-hint">Must be smaller than stock</div>
+                    </div>
+                    <div class="param-input-block">
+                        <label for="l-cut">Turning Length <span class="text-muted fw-normal">(length of finished section)</span></label>
+                        <div class="input-group input-group-sm">
+                            <input type="number" class="form-control" id="l-cut"
+                                   min="0.5" step="0.1" placeholder="e.g. 40">
+                            <span class="input-group-text">mm</span>
+                        </div>
+                        <div class="derived-hint" id="l-cut-hint">Must be shorter than stickout</div>
+                    </div>
+                    <div class="param-input-block">
+                        <label for="spindle-speed">Spindle Speed <span class="text-muted fw-normal">(reference only)</span></label>
+                        <div class="input-group input-group-sm">
+                            <input type="number" class="form-control bg-light" id="spindle-speed" min="500" max="1000" step="50" value="700">
+                            <span class="input-group-text">RPM</span>
+                        </div>
+                        <div class="derived-hint">DC motor: 500 &ndash; 1000 RPM &mdash; AI decides per pass</div>
+                    </div>
+                    <div class="param-input-block">
+                        <label for="feed-rate">Feed Rate <span class="text-muted fw-normal">(reference only)</span></label>
+                        <div class="input-group input-group-sm">
+                            <input type="number" class="form-control bg-light" id="feed-rate" min="30" max="300" step="5" value="150">
+                            <span class="input-group-text">mm/min</span>
+                        </div>
+                        <div class="derived-hint">Paraffin wax: 50 &ndash; 250 mm/min &mdash; AI decides per pass</div>
+                    </div>
+                </div>
+
+                <!-- Derived values -->
+                <div class="row g-2 mb-3">
+                    <div class="col-6">
+                        <div class="axis-block py-2 text-center">
+                            <div class="axis-label">Approach clearance (X)</div>
+                            <div class="axis-value" style="font-size:1rem" id="derived-x-approach">â€”</div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="axis-block py-2 text-center">
+                            <div class="axis-label">G54 Y offset</div>
+                            <div class="axis-value" style="font-size:1rem" id="derived-y-offset">â€”</div>
+                        </div>
+                    </div>
+                </div>
+
+                <button class="btn btn-warning btn-sm text-dark" id="btn-sync" disabled>
+                    <i class="bi bi-arrow-repeat me-1"></i>Sync &amp; Move to Safe Zone
+                </button>
+                <span class="ms-2 small text-muted" id="sync-hint">Home machine first</span>
+            </div>
+            <div id="sync-error" class="alert alert-danger py-2 small mt-2 mb-0" style="display:none"></div>
+        </div>
+
+        <!-- â–¶ STEP 4: Generate & Execute â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+        <div class="workflow-step cnc-card mb-3" id="step4-card">
+            <div class="step-header">
+                <div class="step-badge locked" id="step4-badge">4</div>
+                <div class="flex-grow-1">
+                    <div class="step-title">Generate &amp; Execute Cutting Cycle</div>
+                    <div class="step-desc">Automatically builds a multi-pass program (roughing &rarr; finishing &rarr; spring cut) from your measurements and sends it to the machine.</div>
+                </div>
+                <span class="step-check" id="step4-check"><i class="bi bi-check-circle-fill"></i></span>
+            </div>
+            <div class="step-body mt-3">
+
+                <button class="btn btn-success btn-sm mb-3" id="btn-generate" disabled>
+                    <i class="bi bi-stars me-1"></i>Generate G-code with AI
+                </button>
+                <span class="ms-2 small text-muted" id="generate-hint">Sync workpiece first</span>
+
+                <div id="gcode-section" style="display:none">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <span class="small fw-semibold text-muted">Generated G-code</span>
+                        <button class="btn btn-outline-secondary btn-sm" id="copy-gcode-btn">
+                            <i class="bi bi-clipboard me-1"></i>Copy
+                        </button>
+                    </div>
+                    <textarea id="gcode-preview" class="form-control mb-2"
+                              rows="12" readonly></textarea>
+
+                    <div class="d-flex flex-wrap gap-2 mb-3">
+                        <span class="badge bg-secondary">Roughing &mdash; S500&ndash;S700 &middot; 150&ndash;250 mm/min &middot; 0.5&ndash;1.0 mm/pass</span>
+                        <span class="badge bg-primary">Finishing &mdash; S700&ndash;S900 &middot; 50&ndash;100 mm/min &middot; 0.1&ndash;0.2 mm/pass</span>
+                        <span class="badge bg-info text-dark">Spring cut &mdash; S900&ndash;S1000 &middot; 50 mm/min &middot; 0 advance</span>
+                    </div>
+
+                    <div class="d-flex gap-2 mb-2">
+                        <button class="btn btn-outline-secondary btn-sm" id="btn-validate">
+                            <i class="bi bi-shield-check me-1"></i>Validate
+                        </button>
+                        <button class="btn btn-danger" id="btn-execute">
+                            <i class="bi bi-play-fill me-1"></i>Execute Cutting Cycle
+                        </button>
+                    </div>
+
+                    <div id="validation-box" class="validation-box"></div>
+
+                    <div id="exec-progress" style="display:none" class="mt-2">
+                        <div class="d-flex justify-content-between small text-muted mb-1">
+                            <span id="exec-status-text">Running...</span>
+                            <span id="exec-progress-text">0 / 0 lines</span>
+                        </div>
+                        <div class="progress mb-2" style="height:8px">
+                            <div class="progress-bar bg-success progress-bar-striped progress-bar-animated"
+                                 id="exec-progress-bar" style="width:0%"></div>
+                        </div>
+                        <button class="btn btn-outline-danger btn-sm w-100" id="btn-cancel-job">
+                            <i class="bi bi-stop-circle me-1"></i>Cancel Job
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div id="generate-error" class="alert alert-danger py-2 small mt-2 mb-0" style="display:none"></div>
+        </div>
+
+        <!-- â”€â”€ Recent jobs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
         <div class="cnc-card">
             <div class="cnc-card-title d-flex justify-content-between align-items-center">
-                <span><i class="bi bi-list-check"></i> Recent Jobs</span>
-                <a href="{% url 'jobs:history' %}" class="small text-muted">View all →</a>
+                <span><i class="bi bi-list-check me-1"></i>Recent Jobs</span>
+                <a href="{% url 'jobs:history' %}" class="small text-muted">View all â†’</a>
             </div>
             {% if recent_jobs %}
             <div class="table-responsive">
@@ -205,7 +272,7 @@
                             <td class="text-muted small">{{ job.id }}</td>
                             <td>
                                 <span title="{{ job.command }}"
-                                      style="max-width:240px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.85rem">
+                                      style="max-width:280px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.85rem">
                                     {{ job.command }}
                                 </span>
                             </td>
@@ -221,247 +288,333 @@
                 </table>
             </div>
             {% else %}
-            <p class="text-muted small mb-0">No jobs yet. Enter a command above to get started.</p>
+            <p class="text-muted small mb-0">No jobs yet â€” complete the steps above to get started.</p>
             {% endif %}
         </div>
-    </div>
 
-    <!-- Event log -->
-    <div class="col-lg-5">
-        <div class="cnc-card">
-            <div class="cnc-card-title"><i class="bi bi-journal-text"></i> Event Log</div>
-            {% if logs %}
-            <div style="max-height:200px;overflow-y:auto">
-                <table class="table table-sm mb-0">
-                    <tbody>
-                        {% for log in logs %}
-                        <tr>
-                            <td style="width:70px;white-space:nowrap" class="text-muted small">
-                                {{ log.timestamp|time:"H:i:s" }}
-                            </td>
-                            <td class="small">
-                                <span class="badge bg-secondary me-1" style="font-size:0.65rem">
-                                    {{ log.event_type }}
-                                </span>
-                                {{ log.message|truncatechars:55 }}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+    </div><!-- /col-lg-8 -->
+
+    <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• RIGHT COLUMN â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+    <div class="col-lg-4">
+        <div style="position:sticky;top:72px">
+
+            <!-- Live position â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+            <div class="cnc-card mb-3">
+                <div class="cnc-card-title d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-crosshair me-1"></i>Live Position</span>
+                    <span class="grbl-state-badge" id="grbl-state-badge">â€”</span>
+                </div>
+                <div class="position-panel">
+                    <div class="row g-2 text-center mb-3">
+                        <div class="col-6">
+                            <div class="pos-label">Machine X</div>
+                            <div class="pos-value" id="mpos-x">â€”</div>
+                            <div class="pos-label mt-2" style="color:#2a4a3a">Work X</div>
+                            <div class="pos-value wpos" id="wpos-x">â€”</div>
+                        </div>
+                        <div class="col-6">
+                            <div class="pos-label">Machine Y</div>
+                            <div class="pos-value" id="mpos-y">â€”</div>
+                            <div class="pos-label mt-2" style="color:#2a4a3a">Work Y</div>
+                            <div class="pos-value wpos" id="wpos-y">â€”</div>
+                        </div>
+                    </div>
+                    <div class="row g-2 text-center">
+                        <div class="col-6">
+                            <div class="pos-label">Feed</div>
+                            <div class="pos-value" style="font-size:0.9rem" id="grbl-feed">â€” mm/min</div>
+                        </div>
+                        <div class="col-6">
+                            <div class="pos-label">Spindle</div>
+                            <div class="pos-value" style="font-size:0.9rem" id="grbl-speed">â€” RPM</div>
+                        </div>
+                    </div>
+                </div>
+                <div id="wpos-zeroed-note" class="mt-2 small text-center" style="display:none">
+                    <span class="badge bg-success"><i class="bi bi-check me-1"></i>Work origin confirmed</span>
+                </div>
             </div>
-            {% else %}
-            <p class="text-muted small mb-0">No events logged yet.</p>
-            {% endif %}
-        </div>
-    </div>
 
-</div><!-- /row 3 -->
+            <!-- Machine status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+            <div class="cnc-card mb-3">
+                <div class="cnc-card-title"><i class="bi bi-activity me-1"></i>Machine Status</div>
+                <div class="d-flex align-items-center gap-2 mb-1">
+                    <span class="status-dot disconnected" id="dash-dot"></span>
+                    <span id="dash-status-text" class="fw-semibold">Disconnected</span>
+                </div>
+                <div class="small text-muted" id="dash-job-info">No active job</div>
+            </div>
+
+            <!-- Event log â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+            <div class="cnc-card">
+                <div class="cnc-card-title"><i class="bi bi-journal-text me-1"></i>Event Log</div>
+                {% if logs %}
+                <div style="max-height:220px;overflow-y:auto">
+                    <table class="table table-sm mb-0">
+                        <tbody>
+                            {% for log in logs %}
+                            <tr>
+                                <td style="width:60px;white-space:nowrap" class="text-muted small">
+                                    {{ log.timestamp|time:"H:i:s" }}
+                                </td>
+                                <td class="small">
+                                    <span class="badge bg-secondary me-1" style="font-size:0.63rem">
+                                        {{ log.event_type }}
+                                    </span>
+                                    {{ log.message|truncatechars:50 }}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted small mb-0">No events yet.</p>
+                {% endif %}
+            </div>
+
+        </div><!-- /sticky -->
+    </div><!-- /col-lg-4 -->
+
+</div><!-- /row -->
+
+
 {% endblock %}
 
 {% block extra_js %}
 <script>
-var currentJobId = null;
-var execInterval  = null;
+(function () {
+'use strict';
 
-/* ── Example chips ─────────────────────────────── */
-function setExample(el) {
-    document.getElementById('command-input').value = el.textContent.trim();
-    document.getElementById('command-input').focus();
+var currentJobId      = null;
+var prevStatus        = null;
+var phaseHome         = false;
+var phaseSync         = false;
+var phaseGenerate     = false;
+var homingInitiated   = false;
+var syncingInitiated  = false;
+
+/* DRY-RUN */
+var dryRunToggle = document.getElementById('dry-run-toggle');
+var dryBanner    = document.getElementById('dry-run-banner');
+
+function applyDryRun(enabled) {
+    dryBanner.classList.toggle('active', enabled);
+    postJson('/serial/dry-run/', { enabled: enabled }).catch(function () {});
+}
+dryRunToggle.addEventListener('change', function () { applyDryRun(this.checked); });
+applyDryRun(dryRunToggle.checked);
+
+/* STEP BADGES */
+function markStepDone(n) {
+    var badge = document.getElementById('step' + n + '-badge');
+    var check = document.getElementById('step' + n + '-check');
+    if (badge) { badge.classList.remove('locked'); badge.classList.add('done'); }
+    if (check)  check.classList.add('visible');
+}
+function markStepActive(n) {
+    var badge = document.getElementById('step' + n + '-badge');
+    if (badge) badge.classList.remove('locked');
+}
+function markStepLocked(n) {
+    var badge = document.getElementById('step' + n + '-badge');
+    var check = document.getElementById('step' + n + '-check');
+    if (badge) { badge.classList.add('locked'); badge.classList.remove('done'); }
+    if (check)  check.classList.remove('visible');
 }
 
-/* ── Line count label ───────────────────────────── */
-function updateLineCount(gcode) {
-    var lines = gcode.split('\n').filter(function (l) {
-        return l.trim() && !l.trim().startsWith(';');
-    }).length;
-    document.getElementById('gcode-line-count').textContent =
-        lines > 0 ? lines + ' lines' : '';
+/* PROFILE INPUTS */
+function updateDerived() {
+    var dStock    = parseFloat(document.getElementById('d-stock').value);
+    var lStickout = parseFloat(document.getElementById('l-stickout').value);
+    if (!isNaN(dStock)) {
+        var maxTarget = (dStock - 0.5).toFixed(1);
+        document.getElementById('d-target').max = maxTarget;
+        document.getElementById('d-target-hint').textContent = 'Must be 0.5 - ' + maxTarget + ' mm';
+        document.getElementById('derived-x-approach').textContent = (dStock / 2 + 6).toFixed(3) + ' mm';
+    }
+    if (!isNaN(lStickout)) {
+        var maxCut = (lStickout - 0.5).toFixed(1);
+        document.getElementById('l-cut').max = maxCut;
+        document.getElementById('l-cut-hint').textContent = 'Must be 0.5 - ' + maxCut + ' mm';
+        document.getElementById('derived-y-offset').textContent = (-120 + lStickout).toFixed(3) + ' mm';
+    }
+    refreshStepButtons();
+}
+['d-stock', 'l-stickout', 'd-target', 'l-cut'].forEach(function (id) {
+    document.getElementById(id).addEventListener('input', updateDerived);
+});
+
+function profileValid() {
+    var dStock    = parseFloat(document.getElementById('d-stock').value);
+    var lStickout = parseFloat(document.getElementById('l-stickout').value);
+    var dTarget   = parseFloat(document.getElementById('d-target').value);
+    var lCut      = parseFloat(document.getElementById('l-cut').value);
+    return (dStock >= 1 && dStock <= 185 && lStickout >= 1 && lStickout <= 110 &&
+            dTarget >= 0.5 && dTarget <= dStock - 0.5 && lCut >= 0.5 && lCut <= lStickout - 0.5);
 }
 
-/* ── Validation display ─────────────────────────── */
-function showValidation(data) {
-    var box = document.getElementById('validation-box');
-    box.style.display = 'block';
-    if (data.valid) {
-        box.className = 'validation-box valid';
-        var warn = data.warnings && data.warnings.length
-            ? '<br><small>⚠ ' + data.warnings.join('; ') + '</small>' : '';
-        box.innerHTML =
-            '<i class="bi bi-check-circle-fill me-1"></i>Valid — ' +
-            data.line_count + ' executable line(s).' + warn;
-    } else {
-        box.className = 'validation-box invalid';
-        box.innerHTML =
-            '<i class="bi bi-x-circle-fill me-1"></i><strong>Invalid G-code</strong><br>' +
-            '<small>' + data.errors.join('<br>') + '</small>';
+/* BUTTON STATE REFRESH */
+function refreshStepButtons() {
+    var s    = prevStatus || 'disconnected';
+    var idle = (s === 'connected');
+    var busy = (s === 'running' || s === 'homing' || s === 'syncing');
+
+    document.getElementById('connect-btn').disabled    = (idle || busy);
+    document.getElementById('disconnect-btn').disabled = (!idle && !busy);
+    if (idle || busy) markStepDone(1); else markStepActive(1);
+
+    document.getElementById('btn-home').disabled = !idle;
+    document.getElementById('home-hint').textContent =
+        (!idle && !busy) ? 'Connect first' : (busy ? 'Operation in progress...' : '');
+    if (phaseHome) markStepDone(2); else if (idle) markStepActive(2); else markStepLocked(2);
+
+    var canSync = idle && phaseHome && profileValid();
+    document.getElementById('btn-sync').disabled = !canSync;
+    document.getElementById('sync-hint').textContent =
+        !idle ? '' : !phaseHome ? 'Home machine first' : !profileValid() ? 'Fill in all four measurements' : '';
+    if (phaseSync) markStepDone(3); else if (idle && phaseHome) markStepActive(3); else markStepLocked(3);
+
+    var canGenerate = idle && phaseSync && profileValid();
+    document.getElementById('btn-generate').disabled = !canGenerate;
+    document.getElementById('generate-hint').textContent =
+        !idle ? '' : !phaseSync ? 'Sync workpiece first' : '';
+    if (phaseGenerate) markStepDone(4); else if (idle && phaseSync) markStepActive(4); else markStepLocked(4);
+}
+
+/* 200 ms POLL */
+function fmt(v) { return (typeof v === 'number') ? v.toFixed(3) : '--'; }
+
+function updatePositionPanel(data) {
+    var mpos  = data.mpos  || {};
+    var wpos  = data.wpos  || {};
+    var state = (data.grbl_state || '').toLowerCase();
+
+    var badge = document.getElementById('grbl-state-badge');
+    badge.textContent = data.grbl_state || '--';
+    badge.className   = 'grbl-state-badge ' + state;
+
+    document.getElementById('mpos-x').textContent = fmt(mpos.X) + ' mm';
+    document.getElementById('mpos-y').textContent = fmt(mpos.Y) + ' mm';
+
+    var wxEl = document.getElementById('wpos-x');
+    var wyEl = document.getElementById('wpos-y');
+    wxEl.textContent = fmt(wpos.X) + ' mm';
+    wyEl.textContent = fmt(wpos.Y) + ' mm';
+
+    var zeroed = data.status !== 'disconnected' &&
+                 Math.abs(wpos.X || 0) < 0.001 && Math.abs(wpos.Y || 0) < 0.001;
+    wxEl.classList.toggle('zeroed', zeroed);
+    wyEl.classList.toggle('zeroed', zeroed);
+    document.getElementById('wpos-zeroed-note').style.display = zeroed ? 'block' : 'none';
+
+    document.getElementById('grbl-feed').textContent  =
+        (data.feed  !== undefined ? data.feed.toFixed(0) : '--') + ' mm/min';
+    document.getElementById('grbl-speed').textContent =
+        (data.speed !== undefined ? data.speed : '--') + ' RPM';
+
+    if (data.dry_run !== undefined && data.dry_run !== dryRunToggle.checked) {
+        dryRunToggle.checked = data.dry_run;
+        applyDryRun(data.dry_run);
     }
 }
 
-function clearValidation() {
-    var box = document.getElementById('validation-box');
-    box.style.display = 'none';
-    box.className = 'validation-box';
-}
-
-function showExecuteCard(visible) {
-    document.getElementById('execute-card').style.display       = visible ? 'block' : 'none';
-    document.getElementById('execute-placeholder').style.display = visible ? 'none'  : 'block';
-}
-
-/* ── Generate ───────────────────────────────────── */
-document.getElementById('generate-btn').addEventListener('click', function () {
-    var command = document.getElementById('command-input').value.trim();
-    if (!command) { showToast('Please enter a machining command', 'warning'); return; }
-
-    var btn = this;
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Generating…';
-    clearValidation();
-
-    postJson('/jobs/generate/', { command: command })
+function pollStatus() {
+    fetch('/machine/status/')
+        .then(function (r) { return r.json(); })
         .then(function (data) {
-            if (data.success) {
-                document.getElementById('gcode-preview').value = data.gcode;
-                currentJobId = data.job_id;
-                updateLineCount(data.gcode);
-                showExecuteCard(true);
-                showToast('G-code generated', 'success');
-            } else {
-                showToast(data.message || 'Generation failed', 'danger');
-            }
-        })
-        .catch(function () { showToast('Network error — could not reach server', 'danger'); })
-        .finally(function () {
-            btn.disabled = false;
-            btn.innerHTML = '<i class="bi bi-magic me-1"></i>Generate G-Code';
-        });
-});
+            var navDot = document.getElementById('status-dot');
+            var navLbl = document.getElementById('status-label');
+            if (navDot) navDot.className   = 'status-dot ' + data.status;
+            if (navLbl) navLbl.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
 
-/* ── Validate ───────────────────────────────────── */
-document.getElementById('validate-btn').addEventListener('click', function () {
-    var gcode = document.getElementById('gcode-preview').value.trim();
-    if (!gcode) { showToast('No G-code to validate', 'warning'); return; }
-
-    var btn = this;
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
-
-    postJson('/jobs/validate/', { gcode: gcode })
-        .then(function (data) { showValidation(data); })
-        .catch(function () { showToast('Validation request failed', 'danger'); })
-        .finally(function () {
-            btn.disabled = false;
-            btn.innerHTML = '<i class="bi bi-shield-check me-1"></i>Validate';
-        });
-});
-
-/* ── Execute ────────────────────────────────────── */
-document.getElementById('execute-btn').addEventListener('click', function () {
-    var gcode   = document.getElementById('gcode-preview').value.trim();
-    var command = document.getElementById('command-input').value.trim();
-    if (!gcode) { showToast('No G-code to execute', 'warning'); return; }
-
-    var execBtn    = this;
-    var valBtn     = document.getElementById('validate-btn');
-    var progressEl = document.getElementById('job-progress');
-
-    execBtn.disabled = true;
-    valBtn.disabled  = true;
-    progressEl.style.display = 'block';
-    clearValidation();
-
-    var bar = document.getElementById('progress-bar');
-    bar.className = 'progress-bar progress-bar-striped progress-bar-animated bg-success';
-    bar.style.width = '0%';
-    document.getElementById('progress-text').textContent   = '0 / 0 lines';
-    document.getElementById('progress-status').textContent = '';
-
-    postJson('/jobs/execute/', { gcode: gcode, command: command, job_id: currentJobId })
-        .then(function (data) {
-            if (data.success) {
-                currentJobId = data.job_id;
-                showToast('Job started — executing G-code', 'success');
-                startExecutionPolling(execBtn, valBtn);
-            } else {
-                showToast(data.message || 'Execution failed', 'danger');
-                progressEl.style.display = 'none';
-                execBtn.disabled = false;
-                valBtn.disabled  = false;
-            }
-        })
-        .catch(function () {
-            showToast('Network error during execute', 'danger');
-            progressEl.style.display = 'none';
-            execBtn.disabled = false;
-            valBtn.disabled  = false;
-        });
-});
-
-/* ── Poll execution progress ────────────────────── */
-function startExecutionPolling(execBtn, valBtn) {
-    if (execInterval) clearInterval(execInterval);
-
-    execInterval = setInterval(function () {
-        fetch('/machine/status/')
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                var pct = data.total_lines > 0
-                    ? Math.round((data.current_line / data.total_lines) * 100) : 0;
-
-                document.getElementById('progress-bar').style.width  = pct + '%';
-                document.getElementById('progress-text').textContent =
-                    data.current_line + ' / ' + data.total_lines + ' lines';
-                document.getElementById('progress-status').textContent =
-                    data.error_message || '';
-
-                if (data.status !== 'running') {
-                    clearInterval(execInterval);
-                    execInterval = null;
-                    execBtn.disabled = false;
-                    valBtn.disabled  = false;
-
-                    var bar = document.getElementById('progress-bar');
-                    if (data.status === 'connected') {
-                        bar.className    = 'progress-bar bg-success';
-                        bar.style.width  = '100%';
-                        document.getElementById('progress-text').textContent = 'Completed';
-                        showToast('Job completed successfully!', 'success');
-                    } else if (data.status === 'error') {
-                        bar.className = 'progress-bar bg-danger';
-                        showToast('Job ended: ' + (data.error_message || 'Error'), 'danger');
-                    }
+            var dot  = document.getElementById('dash-dot');
+            var text = document.getElementById('dash-status-text');
+            var info = document.getElementById('dash-job-info');
+            if (dot)  dot.className    = 'status-dot ' + data.status;
+            if (text) text.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+            if (info) {
+                if (data.status === 'running' && data.current_job_id) {
+                    info.textContent = 'Job #' + data.current_job_id + ' running -- ' +
+                                       data.current_line + ' / ' + data.total_lines + ' lines';
+                } else {
+                    info.textContent = data.error_message || 'No active job';
                 }
-            })
-            .catch(function () {});
-    }, 1000);
+            }
+
+            updatePositionPanel(data);
+
+            // Phase state comes from the backend -- no fragile poll-count heuristics needed
+            var backendHomed  = !!data.homed;
+            var backendSynced = !!data.synced;
+
+            if (data.status === 'connected') {
+                // Homing just completed
+                if (backendHomed && !phaseHome) {
+                    phaseHome = true;
+                    homingInitiated = false;
+                    document.getElementById('btn-home').innerHTML =
+                        '<i class="bi bi-house-door-fill me-1"></i>Initialize &amp; Home Machine';
+                    showToast('Homing complete \u2014 machine is at reference position', 'success');
+                }
+                // Syncing just completed
+                if (backendSynced && !phaseSync) {
+                    phaseSync = true;
+                    syncingInitiated = false;
+                    document.getElementById('btn-sync').innerHTML =
+                        '<i class="bi bi-arrow-repeat me-1"></i>Sync &amp; Move to Safe Zone';
+                    showToast('Workpiece synced \u2014 tool at safe zone', 'success');
+                }
+                // Backend reset phases (e.g. after reconnect)
+                if (!backendHomed && phaseHome)  { phaseHome = false; phaseSync = false; }
+                if (!backendSynced && phaseSync) { phaseSync = false; }
+            }
+
+            if (data.status === 'error') {
+                if (homingInitiated) {
+                    homingInitiated = false;
+                    document.getElementById('btn-home').innerHTML =
+                        '<i class="bi bi-house-door-fill me-1"></i>Initialize &amp; Home Machine';
+                    showError('home-error', data.error_message || 'Homing failed');
+                } else if (syncingInitiated) {
+                    syncingInitiated = false;
+                    document.getElementById('btn-sync').innerHTML =
+                        '<i class="bi bi-arrow-repeat me-1"></i>Sync &amp; Move to Safe Zone';
+                    showError('sync-error', data.error_message || 'Sync failed');
+                }
+            }
+
+            prevStatus = data.status;
+            refreshStepButtons();
+
+            if (data.status === 'running' && data.total_lines > 0) {
+                document.getElementById('exec-progress').style.display = 'block';
+                var pct = Math.round((data.current_line / data.total_lines) * 100);
+                document.getElementById('exec-progress-bar').style.width = pct + '%';
+                document.getElementById('exec-progress-text').textContent =
+                    data.current_line + ' / ' + data.total_lines + ' lines';
+                var cancelBtn = document.getElementById('btn-cancel-job');
+                if (cancelBtn) cancelBtn.disabled = false;
+            }
+
+            document.dispatchEvent(new CustomEvent('machine-status', { detail: data }));
+        })
+        .catch(function () {});
 }
 
-/* ── G-code textarea listeners ──────────────────── */
-document.getElementById('gcode-preview').addEventListener('input', function () {
-    updateLineCount(this.value);
-    if (this.value.trim()) showExecuteCard(true);
-});
+setInterval(pollStatus, 200);
+pollStatus();
 
-document.getElementById('clear-gcode-btn').addEventListener('click', function () {
-    document.getElementById('gcode-preview').value          = '';
-    document.getElementById('gcode-line-count').textContent = '';
-    document.getElementById('job-progress').style.display   = 'none';
-    clearValidation();
-    showExecuteCard(false);
-    currentJobId = null;
-    if (execInterval) { clearInterval(execInterval); execInterval = null; }
-});
+/* ERROR HELPER */
+function showError(id, msg) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = msg;
+    el.style.display = 'block';
+    setTimeout(function () { el.style.display = 'none'; }, 7000);
+}
 
-document.getElementById('copy-gcode-btn').addEventListener('click', function () {
-    var gcode = document.getElementById('gcode-preview').value;
-    if (!gcode) return;
-    navigator.clipboard.writeText(gcode)
-        .then(function () { showToast('G-code copied to clipboard', 'success'); })
-        .catch(function () { showToast('Copy failed', 'danger'); });
-});
-
-/* ── COM port loading ───────────────────────────── */
+/* STEP 1 -- CONNECT */
 function loadPorts() {
     var sel = document.getElementById('port-select');
     fetch('/serial/ports/')
@@ -474,107 +627,245 @@ function loadPorts() {
                 data.ports.forEach(function (p) {
                     var opt = document.createElement('option');
                     opt.value       = p.port;
-                    opt.textContent = p.port + ' — ' + p.description;
+                    opt.textContent = p.port + ' -- ' + p.description;
                     if (p.port === data.default_port) opt.selected = true;
                     sel.appendChild(opt);
                 });
             }
         })
-        .catch(function () {
-            sel.innerHTML = '<option value="">Error loading ports</option>';
-        });
+        .catch(function () { sel.innerHTML = '<option value="">Error loading ports</option>'; });
 }
-
 document.getElementById('refresh-ports-btn').addEventListener('click', loadPorts);
 loadPorts();
 
-/* ── Connection button state ────────────────────── */
-function updateConnectionButtons(status) {
-    var connectBtn    = document.getElementById('connect-btn');
-    var disconnectBtn = document.getElementById('disconnect-btn');
-    var connected = (status === 'connected' || status === 'running');
-
-    connectBtn.disabled    = connected;
-    disconnectBtn.disabled = !connected;
-
-    if (connected) {
-        connectBtn.className    = 'btn btn-success btn-sm flex-grow-1 opacity-50';
-        connectBtn.innerHTML    = '<i class="bi bi-plug-fill"></i> Connect';
-        disconnectBtn.className = 'btn btn-danger btn-sm flex-grow-1';
-    } else {
-        connectBtn.className    = 'btn btn-success btn-sm flex-grow-1';
-        connectBtn.innerHTML    = '<i class="bi bi-plug-fill"></i> Connect';
-        disconnectBtn.className = 'btn btn-outline-secondary btn-sm flex-grow-1';
-    }
-}
-
-/* ── Connect / Disconnect ───────────────────────── */
 document.getElementById('connect-btn').addEventListener('click', function () {
     var port = document.getElementById('port-select').value;
     var baud = parseInt(document.getElementById('baud-select').value, 10);
     if (!port) { showToast('Please select a COM port', 'warning'); return; }
-
     var btn = this;
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Connecting…';
-
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Connecting...';
     postJson('/serial/connect/', { port: port, baud_rate: baud })
         .then(function (data) {
             showToast(data.message, data.success ? 'success' : 'danger');
-            if (data.success) {
-                updateConnectionButtons('connected');
-            } else {
-                btn.disabled = false;
-                btn.innerHTML = '<i class="bi bi-plug-fill"></i> Connect';
-                btn.className = 'btn btn-success btn-sm flex-grow-1';
-            }
+            // Always restore label; refreshStepButtons() manages disabled state via poll
+            btn.innerHTML = '<i class="bi bi-plug-fill me-1"></i>Connect';
+            if (!data.success) btn.disabled = false;
         })
         .catch(function () {
             showToast('Connection failed', 'danger');
             btn.disabled = false;
-            btn.innerHTML = '<i class="bi bi-plug-fill"></i> Connect';
-            btn.className = 'btn btn-success btn-sm flex-grow-1';
+            btn.innerHTML = '<i class="bi bi-plug-fill me-1"></i>Connect';
         });
 });
 
 document.getElementById('disconnect-btn').addEventListener('click', function () {
     postJson('/serial/disconnect/', {})
-        .then(function (data) {
-            showToast(data.message, 'info');
-            updateConnectionButtons('disconnected');
-        })
+        .then(function (data) { showToast(data.message, 'info'); })
         .catch(function () { showToast('Error disconnecting', 'danger'); });
 });
 
-/* ── Global status polling (from cnc.js) ────────── */
+/* STEP 2 -- HOME */
+document.getElementById('btn-home').addEventListener('click', function () {
+    document.getElementById('home-error').style.display = 'none';
+    var btn = this;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Homing...';
+    postJson('/serial/home/', {})
+        .then(function (data) {
+            if (data.success) {
+                homingInitiated = true;
+                showToast('Homing started -- watch the machine', 'info');
+            } else {
+                showError('home-error', data.message);
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-house-door-fill me-1"></i>Initialize &amp; Home Machine';
+            }
+        })
+        .catch(function (err) {
+            showError('home-error', 'Request failed: ' + err);
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-house-door-fill me-1"></i>Initialize &amp; Home Machine';
+        });
+});
+
+/* STEP 3 -- SYNC */
+document.getElementById('btn-sync').addEventListener('click', function () {
+    document.getElementById('sync-error').style.display = 'none';
+    var lStickout = parseFloat(document.getElementById('l-stickout').value);
+    if (isNaN(lStickout)) { showError('sync-error', 'Enter Stickout Length first.'); return; }
+    var btn = this;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Syncing...';
+    postJson('/serial/sync/', { l_stickout: lStickout })
+        .then(function (data) {
+            if (data.success) {
+                syncingInitiated = true;
+                showToast('Syncing -- tool moving to safe zone', 'info');
+                btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Moving to safe zone...';
+            } else {
+                showError('sync-error', data.message);
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Sync &amp; Move to Safe Zone';
+            }
+        })
+        .catch(function (err) {
+            showError('sync-error', 'Request failed: ' + err);
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Sync &amp; Move to Safe Zone';
+        });
+});
+
+/* STEP 4 -- GENERATE */
+document.getElementById('btn-generate').addEventListener('click', function () {
+    document.getElementById('generate-error').style.display = 'none';
+    if (!profileValid()) {
+        showError('generate-error', 'All four measurements are required and must be within limits.');
+        return;
+    }
+    var btn = this;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Generating with AI...';
+    var body = {
+        d_stock:    parseFloat(document.getElementById('d-stock').value),
+        l_stickout: parseFloat(document.getElementById('l-stickout').value),
+        d_target:   parseFloat(document.getElementById('d-target').value),
+        l_cut:      parseFloat(document.getElementById('l-cut').value),
+    };
+    postJson('/jobs/generate-profile/', body)
+        .then(function (data) {
+            btn.innerHTML = '<i class="bi bi-stars me-1"></i>Regenerate with AI';
+            btn.disabled  = false;
+            if (data.success) {
+                document.getElementById('gcode-preview').value = data.gcode;
+                currentJobId = data.job_id;
+                document.getElementById('gcode-section').style.display = 'block';
+                document.getElementById('validation-box').style.display = 'none';
+                document.getElementById('exec-progress').style.display  = 'none';
+                phaseGenerate = true;
+                markStepDone(4);
+                showToast('Cutting cycle generated', 'success');
+                document.getElementById('gcode-section').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } else {
+                showError('generate-error', data.message);
+            }
+        })
+        .catch(function (err) {
+            btn.innerHTML = '<i class="bi bi-stars me-1"></i>Generate G-code with AI';
+            btn.disabled  = false;
+            showError('generate-error', 'Generation failed: ' + err);
+        });
+});
+
+/* VALIDATE */
+document.getElementById('btn-validate').addEventListener('click', function () {
+    var gcode = document.getElementById('gcode-preview').value.trim();
+    if (!gcode) return;
+    var btn = this;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+    postJson('/jobs/validate/', { gcode: gcode })
+        .then(function (data) {
+            var box = document.getElementById('validation-box');
+            box.style.display = 'block';
+            if (data.valid) {
+                box.className = 'validation-box valid';
+                box.innerHTML = '<i class="bi bi-check-circle-fill me-1"></i>Valid -- ' +
+                                data.line_count + ' executable lines';
+            } else {
+                box.className = 'validation-box invalid';
+                box.innerHTML = '<i class="bi bi-x-circle-fill me-1"></i><strong>Invalid</strong><br>' +
+                                '<small>' + data.errors.join('<br>') + '</small>';
+            }
+        })
+        .catch(function () { showToast('Validation request failed', 'danger'); })
+        .finally(function () {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-shield-check me-1"></i>Validate';
+        });
+});
+
+/* EXECUTE */
+document.getElementById('btn-execute').addEventListener('click', function () {
+    var gcode    = document.getElementById('gcode-preview').value.trim();
+    if (!gcode) return;
+    var isDryRun = dryRunToggle.checked;
+
+    var btn = this;
+    btn.disabled = true;
+    document.getElementById('exec-progress').style.display = 'block';
+    var bar = document.getElementById('exec-progress-bar');
+    bar.className = 'progress-bar bg-success progress-bar-striped progress-bar-animated';
+    bar.style.width = '0%';
+    document.getElementById('exec-status-text').textContent  = 'Running...';
+    document.getElementById('exec-progress-text').textContent = '0 / ? lines';
+
+    postJson('/jobs/execute/', { gcode: gcode, job_id: currentJobId, command: 'Profile cutting cycle' })
+        .then(function (data) {
+            if (data.success) {
+                currentJobId = data.job_id;
+                showToast('Cutting cycle started', 'success');
+            } else {
+                showToast(data.message || 'Execute failed', 'danger');
+                btn.disabled = false;
+                document.getElementById('exec-progress').style.display = 'none';
+            }
+        })
+        .catch(function (err) {
+            showToast('Execute request failed: ' + err, 'danger');
+            btn.disabled = false;
+            document.getElementById('exec-progress').style.display = 'none';
+        });
+});
+
 document.addEventListener('machine-status', function (e) {
-    var s = e.detail;
-
-    var dot  = document.getElementById('dash-dot');
-    var text = document.getElementById('dash-status-text');
-    var info = document.getElementById('dash-job-info');
-    var wrap = document.getElementById('dash-progress-wrap');
-    var bar  = document.getElementById('dash-progress-bar');
-    var pTxt = document.getElementById('dash-progress-text');
-
-    if (dot)  dot.className    = 'status-dot ' + s.status;
-    if (text) text.textContent = s.status.charAt(0).toUpperCase() + s.status.slice(1);
-
-    updateConnectionButtons(s.status);
-
-    document.getElementById('dash-x').textContent = s.position.X.toFixed(2);
-    document.getElementById('dash-z').textContent = s.position.Z.toFixed(2);
-
-    if (s.status === 'running' && s.total_lines > 0) {
-        wrap.style.display = 'block';
-        var pct = Math.round((s.current_line / s.total_lines) * 100);
-        bar.style.width  = pct + '%';
-        pTxt.textContent = s.current_line + ' / ' + s.total_lines + ' lines';
-        info.textContent = 'Job #' + (s.current_job_id || '?') + ' running';
-    } else {
-        wrap.style.display = 'none';
-        info.textContent   = s.error_message || 'No active job';
+    var s   = e.detail.status;
+    var btn = document.getElementById('btn-execute');
+    if (btn && (s === 'connected' || s === 'error')) {
+        btn.disabled = false;
+        var bar = document.getElementById('exec-progress-bar');
+        if (bar) {
+            if (s === 'connected') {
+                bar.className = 'progress-bar bg-success';
+                bar.style.width = '100%';
+                document.getElementById('exec-status-text').textContent = 'Completed';
+            } else {
+                bar.className = 'progress-bar bg-danger';
+                document.getElementById('exec-status-text').textContent = e.detail.error_message || 'Stopped';
+            }
+        }
     }
 });
+
+/* CANCEL JOB */
+document.getElementById('btn-cancel-job').addEventListener('click', function () {
+    var btn = this;
+    btn.disabled = true;
+    postJson('/serial/cancel-job/', {})
+        .then(function (data) {
+            showToast(data.message, data.success ? 'warning' : 'danger');
+            if (data.success) {
+                document.getElementById('exec-progress').style.display = 'none';
+                document.getElementById('btn-execute').disabled = false;
+            } else {
+                btn.disabled = false;
+            }
+        })
+        .catch(function () {
+            showToast('Cancel request failed', 'danger');
+            btn.disabled = false;
+        });
+});
+
+/* COPY G-CODE */
+document.getElementById('copy-gcode-btn').addEventListener('click', function () {
+    var gcode = document.getElementById('gcode-preview').value;
+    if (!gcode) return;
+    navigator.clipboard.writeText(gcode)
+        .then(function () { showToast('G-code copied to clipboard', 'success'); })
+        .catch(function () { showToast('Copy failed', 'danger'); });
+});
+
+})();
 </script>
 {% endblock %}

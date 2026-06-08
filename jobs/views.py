@@ -135,6 +135,75 @@ def history(request):
     return render(request, 'jobs/history.html', {'jobs': jobs})
 
 
+def cycle(request):
+    """Cycle control page merged into dashboard — redirect to keep old URL working."""
+    from django.shortcuts import redirect
+    return redirect('dashboard:index')
+
+
+@require_POST
+def generate_profile(request):
+    """Phase IV: generate deterministic multi-pass G-code from profile parameters."""
+    try:
+        body = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({'success': False, 'message': 'Invalid request body'})
+
+    try:
+        d_stock = float(body['d_stock'])
+        l_stickout = float(body['l_stickout'])
+        d_target = float(body['d_target'])
+        l_cut = float(body['l_cut'])
+    except (KeyError, ValueError, TypeError) as exc:
+        return JsonResponse({'success': False, 'message': f'Invalid parameter: {exc}'})
+
+    # Strict input validation per spec §4.1
+    errors = []
+    if not (1.0 <= d_stock <= 185.0):
+        errors.append('D_stock must be 1–185 mm')
+    if not (1.0 <= l_stickout <= 110.0):
+        errors.append('L_stickout must be 1–110 mm')
+    if not (0.5 <= d_target <= d_stock - 0.5):
+        errors.append(f'D_target must be 0.5–{d_stock - 0.5:.1f} mm')
+    if not (0.5 <= l_cut <= l_stickout - 0.5):
+        errors.append(f'L_cut must be 0.5–{l_stickout - 0.5:.1f} mm')
+    if errors:
+        return JsonResponse({'success': False, 'message': '; '.join(errors)})
+
+    config = MachineConfig.get_config()
+    if not config.api_key:
+        return JsonResponse({
+            'success': False,
+            'message': 'OpenAI API key not configured — please go to Settings.',
+        })
+
+    try:
+        from gpt_engine.gpt_client import generate_gcode_from_profile
+        gcode = generate_gcode_from_profile(
+            d_stock=d_stock,
+            l_stickout=l_stickout,
+            d_target=d_target,
+            l_cut=l_cut,
+            api_key=config.api_key,
+            model=config.api_model,
+            x_limit=config.x_limit,
+        )
+    except ValueError as exc:
+        return JsonResponse({'success': False, 'message': str(exc)})
+    except Exception as exc:
+        return JsonResponse({'success': False, 'message': f'GPT error: {exc}'})
+
+    job = Job.objects.create(
+        command=(
+            f'Profile turn: Ø{d_stock}→{d_target} mm, '
+            f'L_stickout={l_stickout} mm, L_cut={l_cut} mm'
+        ),
+        generated_gcode=gcode,
+        execution_status='pending',
+    )
+    return JsonResponse({'success': True, 'gcode': gcode, 'job_id': job.id})
+
+
 @require_GET
 def job_detail(request, job_id):
     try:

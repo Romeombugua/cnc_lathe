@@ -326,3 +326,159 @@ body {
     color: #1a1a2e;
     margin-bottom: 0;
 }
+
+/* ─── Cycle Control page ───────────────────────────────── */
+
+/* Dry-run persistent banner */
+#dry-run-banner {
+    display: none;
+    background: #fff3cd;
+    border: 2px solid #ffc107;
+    border-radius: 6px;
+    padding: 10px 16px;
+    font-size: 0.87rem;
+    font-weight: 600;
+    color: #664d03;
+    margin-bottom: 16px;
+    letter-spacing: 0.2px;
+}
+#dry-run-banner.active { display: flex; align-items: center; gap: 8px; }
+
+/* ─── Workflow steps ───────────────────────────────────── */
+
+.workflow-step {
+    border-left: 4px solid #dee2e6;
+    transition: border-color 0.2s;
+}
+.workflow-step:has(.step-badge.done) {
+    border-left-color: #198754;
+}
+.workflow-step:has(.step-badge:not(.locked):not(.done)) {
+    border-left-color: #0d6efd;
+}
+
+.step-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+}
+
+.step-badge {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #0d6efd;
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: background 0.2s;
+}
+.step-badge.locked {
+    background: #ced4da;
+    color: #6c757d;
+}
+.step-badge.done {
+    background: #198754;
+}
+
+.step-title {
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: #1a1a2e;
+    margin-bottom: 2px;
+}
+
+.step-desc {
+    font-size: 0.8rem;
+    color: #666;
+    line-height: 1.4;
+}
+
+.step-check {
+    color: #198754;
+    font-size: 1.2rem;
+    display: none;
+    flex-shrink: 0;
+}
+.step-check.visible { display: block; }
+
+.step-body {
+    padding-left: 46px;   /* aligns with text after the badge */
+}
+
+/* ─── Live position panel ──────────────────────────────── */
+    background: #1a1a2e;
+    border-radius: 8px;
+    padding: 16px 20px;
+    color: #ccc;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.85rem;
+}
+
+.position-panel .pos-section {
+    margin-bottom: 12px;
+}
+
+.position-panel .pos-label {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #555;
+    margin-bottom: 4px;
+}
+
+.pos-value {
+    font-size: 1.05rem;
+    color: #ccc;
+}
+
+.pos-value.wpos { color: #4ade80; }
+.pos-value.wpos.zeroed { color: #00ffcc; text-shadow: 0 0 8px rgba(0,255,204,0.5); }
+
+.grbl-state-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    background: #2a2a4a;
+    color: #aaa;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+.grbl-state-badge.idle  { background: #1e3a2a; color: #4ade80; }
+.grbl-state-badge.run   { background: #3a2a00; color: #fbbf24; }
+.grbl-state-badge.hold  { background: #3a1a00; color: #fb923c; }
+.grbl-state-badge.alarm { background: #3a0000; color: #f87171; }
+.grbl-state-badge.homing { background: #1a2a3a; color: #60a5fa; }
+
+/* Profile input form */
+.profile-input-group {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+@media (max-width: 576px) {
+    .profile-input-group { grid-template-columns: 1fr; }
+}
+
+.param-input-block label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-bottom: 3px;
+    display: block;
+}
+
+.param-input-block .derived-hint {
+    font-size: 0.71rem;
+    color: #888;
+    margin-top: 3px;
+}
